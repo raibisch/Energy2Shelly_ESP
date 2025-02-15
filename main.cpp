@@ -368,22 +368,6 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println(WiFi.localIP());
 }
 
-void handleNotFound() {
-  String message = "Webserver: File not found\n\n";
-  message += "URI: ";
-  message += server.uri();
-  message += "\nMethod: ";
-  message += (server.method() == HTTP_GET) ? "GET" : "POST";
-  message += "\nArguments:";
-  message += server.args();
-  message +="\n";
-
-  for (uint8_t i = 0; i < server.args(); i++) {
-    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
-
-  }
-}
-
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
@@ -392,7 +376,6 @@ void setup(void) {
     server.send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\n");
   });
   server.on("/rpc", ShellyGetDeviceInfoHttp);
-  server.onNotFound(handleNotFound);
   server.addHook(webSocket.hookForWebserver("/rpc", webSocketEvent));
   server.begin();
 
