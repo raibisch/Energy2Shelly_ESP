@@ -1,4 +1,4 @@
-// Energy2Shelly_ESP v0.1
+// Energy2Shelly_ESP v0.2
 
 #include <FS.h>                   
 #include <WiFiManager.h>
@@ -12,6 +12,7 @@
 #include <ESP8266mDNS.h>
 #include <WiFiClient.h>
 #include <WebSockets4WebServer.h>
+#include <WiFiUdp.h>
 
 #define DEBUG false // set to false for no DEBUG output
 #define DEBUG_SERIAL if(DEBUG)Serial
@@ -26,11 +27,16 @@ char shelly_name[26] = "shellypro3em-";
 int rpcId = 1;
 char rpcUser[20] = "user_1";
 
+// SMA Multicast IP and Port
+unsigned int multicastPort = 9522;  // local port to listen on
+IPAddress multicastIP(239, 12, 255, 254);
+
 //flag for saving WifiManager data
 bool shouldSaveConfig = false;
 
-//flag for data source MQTT
-//bool dataMQTT = false;
+//flags for data sources
+bool dataMQTT = false;
+bool dataSMA = false;
 
 struct PowerData
 {
@@ -50,6 +56,7 @@ struct EnergyData
 
 PowerData PhasePower[3];
 EnergyData PhaseEnergy[3];
+String serJsonResponse;
 
 MDNSResponder::hMDNSService hMDNSService = 0; // handle of the http service in the MDNS responder
 MDNSResponder::hMDNSService hMDNSService2 = 0; // handle of the shelly service in the MDNS responder
@@ -60,6 +67,7 @@ WiFiClient wifi_client;
 PubSubClient mqtt_client(wifi_client);
 ESP8266WebServer server(80);
 WebSockets4WebServer webSocket;
+WiFiUDP Udp;
 
 double round2(double value) {
   return (int)(value * 100 + 0.5) / 100.0;
@@ -98,7 +106,7 @@ void saveConfigCallback () {
 }
 
 void MDNSServiceQueryCallback(MDNSResponder::MDNSServiceInfo serviceInfo, MDNSResponder::AnswerType answerType, bool p_bSetContent) {
-  String answerInfo;
+  /*String answerInfo;
   switch (answerType) {
     case MDNSResponder::AnswerType::ServiceDomain: answerInfo = "ServiceDomain " + String(serviceInfo.serviceDomain()); break;
     case MDNSResponder::AnswerType::HostDomainAndPort: answerInfo = "HostDomainAndPort " + String(serviceInfo.hostDomain()) + ":" + String(serviceInfo.hostPort()); break;
@@ -113,9 +121,10 @@ void MDNSServiceQueryCallback(MDNSResponder::MDNSServiceInfo serviceInfo, MDNSRe
     default: answerInfo = "Unknown Answertype";
   }
   DEBUG_SERIAL.printf("Answer %s %s\n", answerInfo.c_str(), p_bSetContent ? "Modified" : "Deleted");
+  */
 }
 
-void ShellyGetDeviceInfoHttp() {
+void GetDeviceInfo() {
   JsonDocument jsonResponse;
   jsonResponse["id"] = rpcId;
   jsonResponse["src"] = shelly_name;
@@ -130,37 +139,12 @@ void ShellyGetDeviceInfoHttp() {
   jsonResponse["result"]["app"] = "Pro3EM";
   jsonResponse["result"]["auth_en"] = false;
   jsonResponse["result"]["profile"] = "triphase";
-
-  String wsResponseJson;
-  serializeJson(jsonResponse,wsResponseJson);
-  server.send(200,"application/json", wsResponseJson);
+  serializeJson(jsonResponse,serJsonResponse);
+  DEBUG_SERIAL.println(serJsonResponse);
 }
 
-void ShellyGetDeviceInfoResponse(uint8_t num){
+void EMGetStatus(){
   JsonDocument jsonResponse;
-  jsonResponse["id"] = rpcId;
-  jsonResponse["src"] = shelly_name;
-  jsonResponse["result"]["name"] = shelly_name;
-  jsonResponse["result"]["id"] = shelly_name;
-  jsonResponse["result"]["mac"] = shelly_mac;
-  jsonResponse["result"]["slot"] = 1;
-  jsonResponse["result"]["model"] = "SPEM-003CEBEU";
-  jsonResponse["result"]["gen"] = 2;
-  jsonResponse["result"]["fw_id"] = "20241011-114455/1.4.4-g6d2a586";
-  jsonResponse["result"]["ver"] = "1.4.4";
-  jsonResponse["result"]["app"] = "Pro3EM";
-  jsonResponse["result"]["auth_en"] = false;
-  jsonResponse["result"]["profile"] = "triphase";
-
-  String wsResponseJson;
-  serializeJson(jsonResponse,wsResponseJson);
-  webSocket.sendTXT(num, wsResponseJson);
-  DEBUG_SERIAL.println(wsResponseJson);
-}
-
-void ShellyEMGetStatus(uint8_t num){
-  JsonDocument jsonResponse;
-
   jsonResponse["id"] = rpcId;
   jsonResponse["src"] = shelly_name;
   jsonResponse["dst"] = rpcUser;
@@ -186,14 +170,11 @@ void ShellyEMGetStatus(uint8_t num){
   jsonResponse["result"]["total_current"] = (PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / 230;
   jsonResponse["result"]["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
   jsonResponse["result"]["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
-  
-  String wsResponseJson;
-  serializeJson(jsonResponse,wsResponseJson);
-  webSocket.sendTXT(num, wsResponseJson);
-  DEBUG_SERIAL.println(wsResponseJson);
+  serializeJson(jsonResponse,serJsonResponse);
+  DEBUG_SERIAL.println(serJsonResponse);
 }
 
-void ShellyEMDataGetStatus(uint8_t num) {
+void EMDataGetStatus() {
   JsonDocument jsonResponse;
   jsonResponse["id"] = rpcId;
   jsonResponse["src"] = shelly_name;
@@ -207,12 +188,29 @@ void ShellyEMDataGetStatus(uint8_t num) {
   jsonResponse["result"]["c_total_act_ret_energy"] = PhaseEnergy[2].gridfeedin;
   jsonResponse["result"]["total_act"] = PhaseEnergy[0].consumption + PhaseEnergy[1].consumption + PhaseEnergy[2].consumption;
   jsonResponse["result"]["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
-
-  String wsResponseJson;
-  serializeJson(jsonResponse,wsResponseJson);
-  webSocket.sendTXT(num, wsResponseJson);
+  serializeJson(jsonResponse,serJsonResponse);
+  DEBUG_SERIAL.println(serJsonResponse);
 }
 
+void ShellyGetDeviceInfoHttp() {
+  GetDeviceInfo();
+  server.send(200,"application/json", serJsonResponse);
+}
+
+void ShellyGetDeviceInfoResponse(uint8_t num){
+  GetDeviceInfo();
+  webSocket.sendTXT(num, serJsonResponse);
+}
+
+void ShellyEMGetStatus(uint8_t num){
+  EMGetStatus();
+  webSocket.sendTXT(num, serJsonResponse);
+}
+
+void ShellyEMDataGetStatus(uint8_t num) {
+  EMDataGetStatus();
+  webSocket.sendTXT(num, serJsonResponse);
+}
 
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
   JsonDocument json;
@@ -231,7 +229,6 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
           deserializeJson(json,payload);
           rpcId = json["id"];
           if (json["method"] == "Shelly.GetDeviceInfo") {
-            DEBUG_SERIAL.println("Starting GetDeviceInfoResponse");
             ShellyGetDeviceInfoResponse(num);
           } else if(json["method"] == "EM.GetStatus") {
             strcpy(rpcUser,json["src"]);
@@ -245,10 +242,13 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
           }
           break;
       case WStype_BIN:
-          DEBUG_SERIAL.printf("[%u] Websocket: unknown request length: %d\n", num, length);
-          hexdump(payload, length);
           break;
   }
+}
+
+void webStatus() {
+  EMGetStatus();
+  server.send(200,"application/json", serJsonResponse);
 }
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
@@ -273,6 +273,103 @@ void mqtt_reconnect() {
       DEBUG_SERIAL.println(" try again in 5 seconds");
       delay(5000);
     }
+  }
+}
+
+void parseSMA() {
+  uint8_t buffer[1024];
+  int packetSize = Udp.parsePacket();
+  String Label;
+  double Pgrid = 0;
+  double Pfeedin = 0;
+  double Peffective = 0;
+  uint32_t timestampalt = 0;
+  bool output = false;
+  if (packetSize) {
+      int rSize = Udp.read(buffer, 1024);
+      if (buffer[0] != 'S' || buffer[1] != 'M' || buffer[2] != 'A') {
+          DEBUG_SERIAL.println("Not an SMA packet?");
+          return;
+      }
+      uint16_t grouplen;
+      uint16_t grouptag;
+      uint8_t* offset = buffer + 4;
+      do {
+          grouplen = (offset[0] << 8) + offset[1];
+          grouptag = (offset[2] << 8) + offset[3];
+          offset += 4;
+          if (grouplen == 0xffff) return;
+          if (grouptag == 0x02A0 && grouplen == 4) {
+              offset += 4;
+          } else if (grouptag == 0x0010) {
+              uint8_t* endOfGroup = offset + grouplen;
+              uint16_t protocolID = (offset[0] << 8) + offset[1];
+              offset += 2;
+              uint16_t susyID = (offset[0] << 8) + offset[1];
+              offset += 2;
+              uint32_t serial = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
+              offset += 4;
+              uint32_t timestamp = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
+              offset += 4;
+              while (offset < endOfGroup) {
+                  uint8_t kanal = offset[0];
+                  uint8_t index = offset[1];
+                  uint8_t art = offset[2];
+                  uint8_t tarif = offset[3];
+                  offset += 4;
+                  if (art == 8) {
+                      uint64_t data = ((uint64_t)offset[0] << 56) +
+                                    ((uint64_t)offset[1] << 48) +
+                                    ((uint64_t)offset[2] << 40) +
+                                    ((uint64_t)offset[3] << 32) +
+                                    ((uint64_t)offset[4] << 24) +
+                                    ((uint64_t)offset[5] << 16) +
+                                    ((uint64_t)offset[6] << 8) +
+                                    offset[7];
+                      offset += 8;
+                  } else if (art == 4) {
+                    uint32_t data = (offset[0] << 24) +
+                    (offset[1] << 16) +
+                    (offset[2] << 8) +
+                    offset[3];
+                    offset += 4;
+                    switch (index) {
+                    case 1:
+                      Pgrid = data * 0.1;
+                      break;
+                    case 2:
+                      Pfeedin = data * 0.1;
+                      output = true;
+                      break;
+                    default:
+                      Label = "Data         : ";
+                      break; // Wird nicht benötigt, wenn Statement(s) vorhanden sind
+                    }
+                      if (output == true){
+                      Peffective = Pgrid - Pfeedin; 
+                      DEBUG_SERIAL.println(Peffective);
+                      setPowerData(Peffective);
+                      output = false;
+                    }
+                  } else if (kanal==144) {
+                    // Optional: Versionsnummer auslesen... aber interessiert die?
+                    offset += 4;
+                  } else {
+                      offset += art;
+                      DEBUG_SERIAL.println("Strange measurement skipped");
+                  }
+              }
+          } else if (grouptag == 0) {
+              // end marker
+              offset += grouplen;
+          } else {
+              DEBUG_SERIAL.print("unhandled group ");
+              DEBUG_SERIAL.print(grouptag);
+              DEBUG_SERIAL.print(" with len=");
+              DEBUG_SERIAL.println(grouplen);
+              offset += grouplen;
+          }
+      } while (grouplen > 0 && offset + 4 < buffer + rSize);
   }
 }
 
@@ -307,14 +404,11 @@ void WifiManagerSetup() {
   } else {
     DEBUG_SERIAL.println("failed to mount FS");
   }
-  // The extra parameters to be configured (can be either global or just in the setup)
-  // After connecting, parameter.getValue() will get you the configured value
-  // id/name placeholder/prompt default length
-  
-  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server", mqtt_server, 40);
+
+  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or \"SMA\" for SMA EM/HM Multicast", mqtt_server, 40);
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 40);
-  WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID", shelly_mac, 13);
+  WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
 
   WiFiManager wifiManager;
 
@@ -346,8 +440,16 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
   DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
 
-  mqtt_client.setServer(mqtt_server, String(mqtt_port).toInt());
-  mqtt_client.setCallback(mqtt_callback);
+  if(strcmp(mqtt_server, "SMA") == 0) {
+    dataSMA = true;
+  } else {
+    dataMQTT = true;
+  }
+
+  if(dataMQTT) {
+    mqtt_client.setServer(mqtt_server, String(mqtt_port).toInt());
+    mqtt_client.setCallback(mqtt_callback);
+  }
 
   if (shouldSaveConfig) {
     DEBUG_SERIAL.println("saving config");
@@ -368,40 +470,6 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println(WiFi.localIP());
 }
 
-void webStatus() {
-  JsonDocument jsonResponse;
-
-  jsonResponse["id"] = rpcId;
-  jsonResponse["src"] = shelly_name;
-  jsonResponse["dst"] = rpcUser;
-  jsonResponse["result"]["id"] = 0;
-  jsonResponse["result"]["a_current"] = PhasePower[0].current;
-  jsonResponse["result"]["a_voltage"] = PhasePower[0].voltage;
-  jsonResponse["result"]["a_act_power"] = PhasePower[0].power;
-  jsonResponse["result"]["a_aprt_power"] = PhasePower[0].apparentPower;
-  jsonResponse["result"]["a_pf"] = PhasePower[0].powerFactor;
-  jsonResponse["result"]["a_freq"] = PhasePower[0].frequency;
-  jsonResponse["result"]["b_current"] = PhasePower[1].current;
-  jsonResponse["result"]["b_voltage"] = PhasePower[1].voltage;
-  jsonResponse["result"]["b_act_power"] = PhasePower[1].power;
-  jsonResponse["result"]["b_aprt_power"] = PhasePower[1].apparentPower;
-  jsonResponse["result"]["b_pf"] = PhasePower[1].powerFactor;
-  jsonResponse["result"]["b_freq"] = PhasePower[1].frequency;
-  jsonResponse["result"]["c_current"] = PhasePower[2].current;
-  jsonResponse["result"]["c_voltage"] = PhasePower[2].voltage;
-  jsonResponse["result"]["c_act_power"] = PhasePower[2].power;
-  jsonResponse["result"]["c_aprt_power"] = PhasePower[2].apparentPower;
-  jsonResponse["result"]["c_pf"] = PhasePower[2].powerFactor;
-  jsonResponse["result"]["c_freq"] = PhasePower[2].frequency;
-  jsonResponse["result"]["total_current"] = (PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / 230;
-  jsonResponse["result"]["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
-  jsonResponse["result"]["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
-
-  String wsResponseJson;
-  serializeJson(jsonResponse,wsResponseJson);
-  server.send(200,"application/json", wsResponseJson);
-}
-
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
@@ -412,10 +480,17 @@ void setup(void) {
   server.on("/status", HTTP_GET, webStatus);
   server.on("/rpc", ShellyGetDeviceInfoHttp);
   server.addHook(webSocket.hookForWebserver("/rpc", webSocketEvent));
-
-
   server.begin();
 
+  // Set Up Multicast for SMA Energy Meter
+  if(dataSMA) {
+    Udp.begin(multicastPort);
+    #ifdef ESP8266
+      Udp.beginMulticast(WiFi.localIP(), multicastIP, multicastPort);
+    #else
+      Udp.beginMulticast(multicastIP, multicastPort);
+    #endif
+  }
 
   // Set up mDNS responder
   strcat(shelly_name,shelly_mac);
@@ -462,9 +537,14 @@ void setup(void) {
 void loop(void) {
   server.handleClient();
   webSocket.loop();
-    MDNS.update();
+  MDNS.update();
+  if(dataMQTT) {
     if (!mqtt_client.connected()) {
       mqtt_reconnect();
     }
     mqtt_client.loop();
+  }
+  if(dataSMA) {
+    parseSMA();
+  }
 }
