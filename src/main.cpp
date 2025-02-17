@@ -368,6 +368,40 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println(WiFi.localIP());
 }
 
+void webStatus() {
+  JsonDocument jsonResponse;
+
+  jsonResponse["id"] = rpcId;
+  jsonResponse["src"] = shelly_name;
+  jsonResponse["dst"] = rpcUser;
+  jsonResponse["result"]["id"] = 0;
+  jsonResponse["result"]["a_current"] = PhasePower[0].current;
+  jsonResponse["result"]["a_voltage"] = PhasePower[0].voltage;
+  jsonResponse["result"]["a_act_power"] = PhasePower[0].power;
+  jsonResponse["result"]["a_aprt_power"] = PhasePower[0].apparentPower;
+  jsonResponse["result"]["a_pf"] = PhasePower[0].powerFactor;
+  jsonResponse["result"]["a_freq"] = PhasePower[0].frequency;
+  jsonResponse["result"]["b_current"] = PhasePower[1].current;
+  jsonResponse["result"]["b_voltage"] = PhasePower[1].voltage;
+  jsonResponse["result"]["b_act_power"] = PhasePower[1].power;
+  jsonResponse["result"]["b_aprt_power"] = PhasePower[1].apparentPower;
+  jsonResponse["result"]["b_pf"] = PhasePower[1].powerFactor;
+  jsonResponse["result"]["b_freq"] = PhasePower[1].frequency;
+  jsonResponse["result"]["c_current"] = PhasePower[2].current;
+  jsonResponse["result"]["c_voltage"] = PhasePower[2].voltage;
+  jsonResponse["result"]["c_act_power"] = PhasePower[2].power;
+  jsonResponse["result"]["c_aprt_power"] = PhasePower[2].apparentPower;
+  jsonResponse["result"]["c_pf"] = PhasePower[2].powerFactor;
+  jsonResponse["result"]["c_freq"] = PhasePower[2].frequency;
+  jsonResponse["result"]["total_current"] = (PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / 230;
+  jsonResponse["result"]["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
+  jsonResponse["result"]["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
+
+  String wsResponseJson;
+  serializeJson(jsonResponse,wsResponseJson);
+  server.send(200,"application/json", wsResponseJson);
+}
+
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
@@ -375,9 +409,13 @@ void setup(void) {
   server.on("/", []() {
     server.send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\n");
   });
+  server.on("/status", HTTP_GET, webStatus);
   server.on("/rpc", ShellyGetDeviceInfoHttp);
   server.addHook(webSocket.hookForWebserver("/rpc", webSocketEvent));
+
+
   server.begin();
+
 
   // Set up mDNS responder
   strcat(shelly_name,shelly_mac);
