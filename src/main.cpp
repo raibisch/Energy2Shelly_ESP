@@ -1,6 +1,6 @@
-// Energy2Shelly_ESP v0.2
+// Energy2Shelly_ESP v0.3
 
-#include <FS.h>                   
+#include <FS.h>
 #include <WiFiManager.h>
 #ifdef ESP32
   #include <SPIFFS.h>
@@ -14,14 +14,15 @@
 #include <WebSockets4WebServer.h>
 #include <WiFiUdp.h>
 
-#define DEBUG false // set to false for no DEBUG output
+#define DEBUG true // set to false for no DEBUG output
 #define DEBUG_SERIAL if(DEBUG)Serial
 
 //define your default values here, if there are different values in config.json, they are overwritten.
 char mqtt_server[40];
 char mqtt_port[6] = "1883";
 char mqtt_topic[40] = "tele/meter/SENSOR";
-char shelly_mac[13] = "1a2b3c4d5e6f";
+char mqtt_power_path[40] = "";
+char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 
 int rpcId = 1;
@@ -73,6 +74,17 @@ double round2(double value) {
   return (int)(value * 100 + 0.5) / 100.0;
 }
 
+JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
+  for (size_t n = 0; path[n]; n++) {
+    if (path[n] == '.') {
+      variant = variant[JsonString(path, n)];
+      path += n + 1;
+      n = 0;
+    }
+  }
+  return variant[path];
+}
+
 void setPowerData(double totalPower) {    
   PhasePower[0].power = round2(totalPower * 0.3333);
   PhasePower[1].power = round2(totalPower * 0.3333);
@@ -106,22 +118,7 @@ void saveConfigCallback () {
 }
 
 void MDNSServiceQueryCallback(MDNSResponder::MDNSServiceInfo serviceInfo, MDNSResponder::AnswerType answerType, bool p_bSetContent) {
-  /*String answerInfo;
-  switch (answerType) {
-    case MDNSResponder::AnswerType::ServiceDomain: answerInfo = "ServiceDomain " + String(serviceInfo.serviceDomain()); break;
-    case MDNSResponder::AnswerType::HostDomainAndPort: answerInfo = "HostDomainAndPort " + String(serviceInfo.hostDomain()) + ":" + String(serviceInfo.hostPort()); break;
-    case MDNSResponder::AnswerType::IP4Address:
-      answerInfo = "IP4Address ";
-      for (IPAddress ip : serviceInfo.IP4Adresses()) { answerInfo += "- " + ip.toString(); };
-      break;
-    case MDNSResponder::AnswerType::Txt:
-      answerInfo = "TXT " + String(serviceInfo.strKeyValue());
-      for (auto kv : serviceInfo.keyValues()) { answerInfo += "\nkv : " + String(kv.first) + " : " + String(kv.second); }
-      break;
-    default: answerInfo = "Unknown Answertype";
-  }
-  DEBUG_SERIAL.printf("Answer %s %s\n", answerInfo.c_str(), p_bSetContent ? "Modified" : "Deleted");
-  */
+  // Nothing to do here
 }
 
 void GetDeviceInfo() {
@@ -241,21 +238,27 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
             DEBUG_SERIAL.printf("[%u] Websocket: unknown request: %s\n", num, payload);
           }
           break;
-      case WStype_BIN:
+      default:
           break;
   }
 }
 
 void webStatus() {
   EMGetStatus();
-  server.send(200,"application/json", serJsonResponse);
+  server.send(200, "application/json", serJsonResponse);
 }
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   JsonDocument json;
   deserializeJson(json, payload, length);
-  setPowerData(json["ENERGY"]["Power"].as<double>());
-  setEnergyData(json["ENERGY"]["TotalIn"].as<double>(), json["ENERGY"]["TotalOut"].as<double>());
+  if (strcmp(mqtt_power_path, "") == 0) {
+    payload[length] = '\0';
+    setPowerData(atof((char *)payload));
+  } else {
+    double power = resolveJsonPath(json, mqtt_power_path);
+    setPowerData(power);
+    setEnergyData(json["ENERGY"]["TotalIn"].as<double>(), json["ENERGY"]["TotalOut"].as<double>());
+  } 
 }
 
 void mqtt_reconnect() {
@@ -272,6 +275,7 @@ void mqtt_reconnect() {
       DEBUG_SERIAL.print(mqtt_client.state());
       DEBUG_SERIAL.println(" try again in 5 seconds");
       delay(5000);
+      server.handleClient(); // // make /reset accessible if MQTT can't connect
     }
   }
 }
@@ -279,12 +283,6 @@ void mqtt_reconnect() {
 void parseSMA() {
   uint8_t buffer[1024];
   int packetSize = Udp.parsePacket();
-  String Label;
-  double Pgrid = 0;
-  double Pfeedin = 0;
-  double Peffective = 0;
-  uint32_t timestampalt = 0;
-  bool output = false;
   if (packetSize) {
       int rSize = Udp.read(buffer, 1024);
       if (buffer[0] != 'S' || buffer[1] != 'M' || buffer[2] != 'A') {
@@ -312,12 +310,12 @@ void parseSMA() {
               uint32_t timestamp = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
               offset += 4;
               while (offset < endOfGroup) {
-                  uint8_t kanal = offset[0];
+                  uint8_t channel = offset[0];
                   uint8_t index = offset[1];
-                  uint8_t art = offset[2];
+                  uint8_t type = offset[2];
                   uint8_t tarif = offset[3];
                   offset += 4;
-                  if (art == 8) {
+                  if (type == 8) {
                       uint64_t data = ((uint64_t)offset[0] << 56) +
                                     ((uint64_t)offset[1] << 48) +
                                     ((uint64_t)offset[2] << 40) +
@@ -327,7 +325,7 @@ void parseSMA() {
                                     ((uint64_t)offset[6] << 8) +
                                     offset[7];
                       offset += 8;
-                  } else if (art == 4) {
+                  } else if (type == 4) {
                     uint32_t data = (offset[0] << 24) +
                     (offset[1] << 16) +
                     (offset[2] << 8) +
@@ -335,28 +333,92 @@ void parseSMA() {
                     offset += 4;
                     switch (index) {
                     case 1:
-                      Pgrid = data * 0.1;
+                      // 1.4.0 Total grid power in dW - unused
                       break;
                     case 2:
-                      Pfeedin = data * 0.1;
-                      output = true;
+                      // 2.4.0 Total feed-in power in dW - unused
+                      break;
+                    case 14:
+                     // Not sure why this doesn't work here...
+                     for(int i=0;i<=2;i++) {
+                       PhasePower[i].frequency = data * 0.001;
+                     }
+                     break;
+                    case 21:
+                      PhasePower[0].power = data * 0.1;
+                      PhasePower[0].frequency = 50; // workaround
+                      break;
+                    case 22:
+                      PhasePower[0].power -= data * 0.1;
+                      break;
+                    case 29:
+                      PhasePower[0].apparentPower = data * 0.1;
+                      break;
+                    case 30:
+                      PhasePower[0].apparentPower -= data * 0.1;
+                      break;
+                    case 31:
+                      PhasePower[0].current = data * 0.001;
+                      break;
+                    case 32:
+                      PhasePower[0].voltage = data * 0.001;
+                      break;
+                    case 33:
+                      PhasePower[0].powerFactor = data * 0.001;
+                      break;
+                    case 41:
+                      PhasePower[1].power = data * 0.1;
+                      PhasePower[1].frequency = 50; // workaround
+                      break;
+                    case 42:
+                      PhasePower[1].power -= data * 0.1;
+                      break;
+                    case 49:
+                      PhasePower[1].apparentPower = data * 0.1;
+                      break;
+                    case 50:
+                      PhasePower[1].apparentPower -= data * 0.1;
+                      break;
+                    case 51:
+                      PhasePower[1].current = data * 0.001;
+                      break;
+                    case 52:
+                      PhasePower[1].voltage = data * 0.001;
+                      break;
+                    case 53:
+                      PhasePower[1].powerFactor = data * 0.001;
+                      break;
+                    case 61:
+                      PhasePower[2].power = data * 0.1;
+                      PhasePower[2].frequency = 50; // workaround
+                      break;
+                    case 62:
+                      PhasePower[2].power -= data * 0.1;
+                      break;
+                    case 69:
+                      PhasePower[2].apparentPower = data * 0.1;
+                      break;
+                    case 70:
+                      PhasePower[2].apparentPower -= data * 0.1;
+                      break;
+                    case 71:
+                      PhasePower[2].current = data * 0.001;
+                      break;
+                    case 72:
+                      PhasePower[2].voltage = data * 0.001;
+                      break;
+                    case 73:
+                      PhasePower[2].powerFactor = data * 0.001;
                       break;
                     default:
-                      Label = "Data         : ";
-                      break; // Wird nicht benötigt, wenn Statement(s) vorhanden sind
+                      break;
                     }
-                      if (output == true){
-                      Peffective = Pgrid - Pfeedin; 
-                      DEBUG_SERIAL.println(Peffective);
-                      setPowerData(Peffective);
-                      output = false;
-                    }
-                  } else if (kanal==144) {
-                    // Optional: Versionsnummer auslesen... aber interessiert die?
+                  } else if (channel == 144) {
+                    // optional handling of version number
                     offset += 4;
                   } else {
-                      offset += art;
-                      DEBUG_SERIAL.println("Strange measurement skipped");
+                      offset += type;
+                      DEBUG_SERIAL.println("Unknown measurement");
                   }
               }
           } else if (grouptag == 0) {
@@ -374,6 +436,11 @@ void parseSMA() {
 }
 
 void WifiManagerSetup() {
+  // Set Shelly ID to ESP's MAC address by default
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  sprintf (shelly_mac, "%02x%02x%02x%02x%02x%02x", mac [0], mac [1], mac [2], mac [3], mac [4], mac [5]);
+
   JsonDocument json;
   DEBUG_SERIAL.println("mounting FS...");
 
@@ -394,8 +461,9 @@ void WifiManagerSetup() {
           strcpy(mqtt_server, json["mqtt_server"]);
           strcpy(mqtt_port, json["mqtt_port"]);
           strcpy(mqtt_topic, json["mqtt_topic"]);
+          strcpy(mqtt_power_path, json["mqtt_power:_path"]);
           strcpy(shelly_mac, json["shelly_mac"]);
-        } else {
+          } else {
           DEBUG_SERIAL.println("failed to load json config");
         }
         configFile.close();
@@ -404,10 +472,11 @@ void WifiManagerSetup() {
   } else {
     DEBUG_SERIAL.println("failed to mount FS");
   }
-
+  
   WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or \"SMA\" for SMA EM/HM Multicast", mqtt_server, 40);
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 40);
+  WiFiManagerParameter custom_mqtt_power_path("power_path", "optional MQTT Power JSON path (e.g. \"ENERGY.Power\")", mqtt_power_path, 40);
   WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
 
   WiFiManager wifiManager;
@@ -418,9 +487,10 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_topic);
+  wifiManager.addParameter(&custom_mqtt_power_path);
   wifiManager.addParameter(&custom_shelly_mac);
 
-  if (!wifiManager.autoConnect()) {
+  if (!wifiManager.autoConnect("Energy2Shelly")) {
     DEBUG_SERIAL.println("failed to connect and hit timeout");
     delay(3000);
     ESP.restart();
@@ -432,18 +502,22 @@ void WifiManagerSetup() {
   strcpy(mqtt_server, custom_mqtt_server.getValue());
   strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
+  strcpy(mqtt_power_path, custom_mqtt_power_path.getValue());
   strcpy(shelly_mac, custom_shelly_mac.getValue());
   
   DEBUG_SERIAL.println("The values in the file are: ");
   DEBUG_SERIAL.println("\tmqtt_server : " + String(mqtt_server));
   DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
+  DEBUG_SERIAL.println("\tmqtt_power_path : " + String(mqtt_power_path));
   DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
 
   if(strcmp(mqtt_server, "SMA") == 0) {
     dataSMA = true;
+    DEBUG_SERIAL.println("Enabling SMA Multicast data input");
   } else {
     dataMQTT = true;
+    DEBUG_SERIAL.println("Enabling MQTT data input");
   }
 
   if(dataMQTT) {
@@ -456,6 +530,7 @@ void WifiManagerSetup() {
     json["mqtt_server"] = mqtt_server;
     json["mqtt_port"] = mqtt_port;
     json["mqtt_topic"] = mqtt_topic;
+    json["mqtt_power_path"] = mqtt_power_path;
     json["shelly_mac"] = shelly_mac;
 
     File configFile = SPIFFS.open("/config.json", "w");
@@ -470,6 +545,14 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println(WiFi.localIP());
 }
 
+void webReset() {
+  server.send(200, "text/plain", "Resetting configuration, please log back into the hotspot to reconfigure...\r\n");
+  delay(3000);
+  SPIFFS.remove("/config.json");
+  WiFi.disconnect(true);
+  ESP.restart();
+}
+
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
@@ -478,6 +561,7 @@ void setup(void) {
     server.send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\n");
   });
   server.on("/status", HTTP_GET, webStatus);
+  server.on("/reset", HTTP_GET, webReset);
   server.on("/rpc", ShellyGetDeviceInfoHttp);
   server.addHook(webSocket.hookForWebserver("/rpc", webSocketEvent));
   server.begin();
@@ -530,7 +614,6 @@ void setup(void) {
             DEBUG_SERIAL.printf("MDNSProbeResultCallback: FAILED to install service query for 'shelly.tcp' services!\n");
           }
         }
-  
   DEBUG_SERIAL.println("mDNS responder started");
 }
 
