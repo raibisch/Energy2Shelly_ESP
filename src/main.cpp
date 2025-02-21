@@ -20,8 +20,11 @@
 //define your default values here, if there are different values in config.json, they are overwritten.
 char mqtt_server[40];
 char mqtt_port[6] = "1883";
-char mqtt_topic[40] = "tele/meter/SENSOR";
-char mqtt_power_path[40] = "";
+char mqtt_topic[60] = "tele/meter/SENSOR";
+char mqtt_power_path[60] = "";
+char mqtt_energy_in_path[60] ="";
+char mqtt_energy_out_path[60] ="";
+
 char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 
@@ -189,6 +192,18 @@ void EMDataGetStatus() {
   DEBUG_SERIAL.println(serJsonResponse);
 }
 
+void EMGetConfig() {
+  JsonDocument jsonResponse;
+  jsonResponse["id"] = rpcId;
+  jsonResponse["name"] = nullptr;
+  jsonResponse["blink_mode_selector"] = "active_energy";
+  jsonResponse["phase_selector"] = "a";
+  jsonResponse["monitor_phase_sequence"] = true;
+  jsonResponse["ct_type"] = "120A";
+  serializeJson(jsonResponse,serJsonResponse);
+  DEBUG_SERIAL.println(serJsonResponse);
+}
+
 void ShellyGetDeviceInfoHttp() {
   GetDeviceInfo();
   server.send(200,"application/json", serJsonResponse);
@@ -206,6 +221,11 @@ void ShellyEMGetStatus(uint8_t num){
 
 void ShellyEMDataGetStatus(uint8_t num) {
   EMDataGetStatus();
+  webSocket.sendTXT(num, serJsonResponse);
+}
+
+void ShellyEMGetConfig(uint8_t num) {
+  EMGetConfig();
   webSocket.sendTXT(num, serJsonResponse);
 }
 
@@ -233,6 +253,8 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
           } else if(json["method"] == "EMData.GetStatus") {
             strcpy(rpcUser,json["src"]);
             ShellyEMDataGetStatus(num);
+          } else if(json["method"] == "EM.GetConfig") {
+            ShellyEMGetConfig(num);
           }
           else {
             DEBUG_SERIAL.printf("[%u] Websocket: unknown request: %s\n", num, payload);
@@ -244,8 +266,12 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
 }
 
 void webStatus() {
+  // GetDeviceInfo();
+  // server.send(200, "application/json", serJsonResponse );
   EMGetStatus();
   server.send(200, "application/json", serJsonResponse);
+  // EMDataGetStatus();
+  // server.send(200, "application/json", serJsonResponse);
 }
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
@@ -257,7 +283,9 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   } else {
     double power = resolveJsonPath(json, mqtt_power_path);
     setPowerData(power);
-    setEnergyData(json["ENERGY"]["TotalIn"].as<double>(), json["ENERGY"]["TotalOut"].as<double>());
+    double energyIn = resolveJsonPath(json, mqtt_energy_in_path);
+    double energyOut = resolveJsonPath(json, mqtt_energy_out_path);
+    setEnergyData(energyIn, energyOut);
   } 
 }
 
@@ -275,7 +303,7 @@ void mqtt_reconnect() {
       DEBUG_SERIAL.print(mqtt_client.state());
       DEBUG_SERIAL.println(" try again in 5 seconds");
       delay(5000);
-      server.handleClient(); // // make /reset accessible if MQTT can't connect
+      server.handleClient(); // make /reset accessible if MQTT can't connect
     }
   }
 }
@@ -316,15 +344,35 @@ void parseSMA() {
                   uint8_t tarif = offset[3];
                   offset += 4;
                   if (type == 8) {
-                      uint64_t data = ((uint64_t)offset[0] << 56) +
-                                    ((uint64_t)offset[1] << 48) +
-                                    ((uint64_t)offset[2] << 40) +
-                                    ((uint64_t)offset[3] << 32) +
-                                    ((uint64_t)offset[4] << 24) +
-                                    ((uint64_t)offset[5] << 16) +
-                                    ((uint64_t)offset[6] << 8) +
-                                    offset[7];
-                      offset += 8;
+                    uint64_t data = ((uint64_t)offset[0] << 56) +
+                                  ((uint64_t)offset[1] << 48) +
+                                  ((uint64_t)offset[2] << 40) +
+                                  ((uint64_t)offset[3] << 32) +
+                                  ((uint64_t)offset[4] << 24) +
+                                  ((uint64_t)offset[5] << 16) +
+                                  ((uint64_t)offset[6] << 8) +
+                                  offset[7];
+                    offset += 8;
+                    switch (index) {
+                      case 21:
+                        PhaseEnergy[0].consumption = data / 3600000;
+                        break;
+                      case 22:
+                        PhaseEnergy[0].gridfeedin = data / 3600000;
+                        break;
+                      case 41:
+                        PhaseEnergy[1].consumption = data / 3600000;
+                        break;
+                      case 42:
+                        PhaseEnergy[1].gridfeedin = data / 3600000;
+                        break;
+                      case 61:
+                        PhaseEnergy[2].consumption = data / 3600000;
+                        break;
+                      case 62:
+                        PhaseEnergy[2].gridfeedin = data / 3600000;
+                        break;
+                    }
                   } else if (type == 4) {
                     uint32_t data = (offset[0] << 24) +
                     (offset[1] << 16) +
@@ -461,7 +509,9 @@ void WifiManagerSetup() {
           strcpy(mqtt_server, json["mqtt_server"]);
           strcpy(mqtt_port, json["mqtt_port"]);
           strcpy(mqtt_topic, json["mqtt_topic"]);
-          strcpy(mqtt_power_path, json["mqtt_power:_path"]);
+          strcpy(mqtt_power_path, json["mqtt_power_path"]);
+          strcpy(mqtt_energy_in_path, json["mqtt_energy_in_path"]);
+          strcpy(mqtt_energy_out_path, json["mqtt_energy_out_path"]);
           strcpy(shelly_mac, json["shelly_mac"]);
           } else {
           DEBUG_SERIAL.println("failed to load json config");
@@ -475,11 +525,16 @@ void WifiManagerSetup() {
   
   WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or \"SMA\" for SMA EM/HM Multicast", mqtt_server, 40);
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
-  WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 40);
-  WiFiManagerParameter custom_mqtt_power_path("power_path", "optional MQTT Power JSON path (e.g. \"ENERGY.Power\")", mqtt_power_path, 40);
+  WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 60);
+  WiFiManagerParameter custom_mqtt_power_path("power_path", "optional MQTT Power JSON path (e.g. \"ENERGY.Power\")", mqtt_power_path, 60);
+  WiFiManagerParameter custom_mqtt_energy_in_path("energy_in_path", "optional MQTT energy from grid JSON path (e.g. \"ENERGY.Grid\")", mqtt_energy_in_path, 60);
+  WiFiManagerParameter custom_mqtt_energy_out_path("energy_out_path", "optional MQTT energy to grid JSON path (e.g. \"ENERGY.FeedIn\")", mqtt_energy_out_path, 60);
   WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
 
   WiFiManager wifiManager;
+  if(!DEBUG) {
+    wifiManager.setDebugOutput(false);
+  }
 
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
@@ -488,6 +543,8 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_topic);
   wifiManager.addParameter(&custom_mqtt_power_path);
+  wifiManager.addParameter(&custom_mqtt_energy_in_path);
+  wifiManager.addParameter(&custom_mqtt_energy_out_path);
   wifiManager.addParameter(&custom_shelly_mac);
 
   if (!wifiManager.autoConnect("Energy2Shelly")) {
@@ -503,6 +560,8 @@ void WifiManagerSetup() {
   strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
   strcpy(mqtt_power_path, custom_mqtt_power_path.getValue());
+  strcpy(mqtt_energy_in_path, custom_mqtt_energy_in_path.getValue());
+  strcpy(mqtt_energy_out_path, custom_mqtt_energy_out_path.getValue());
   strcpy(shelly_mac, custom_shelly_mac.getValue());
   
   DEBUG_SERIAL.println("The values in the file are: ");
@@ -510,6 +569,8 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
   DEBUG_SERIAL.println("\tmqtt_power_path : " + String(mqtt_power_path));
+  DEBUG_SERIAL.println("\tmqtt_energy_in_path : " + String(mqtt_energy_in_path));
+  DEBUG_SERIAL.println("\tmqtt_energy_out_path : " + String(mqtt_energy_out_path));
   DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
 
   if(strcmp(mqtt_server, "SMA") == 0) {
@@ -531,6 +592,8 @@ void WifiManagerSetup() {
     json["mqtt_port"] = mqtt_port;
     json["mqtt_topic"] = mqtt_topic;
     json["mqtt_power_path"] = mqtt_power_path;
+    json["mqtt_energy_in_path"] = mqtt_energy_in_path;
+    json["mqtt_energy_out_path"] = mqtt_energy_out_path;
     json["shelly_mac"] = shelly_mac;
 
     File configFile = SPIFFS.open("/config.json", "w");
@@ -559,6 +622,8 @@ void setup(void) {
 
   server.on("/", []() {
     server.send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\n");
+    server.send(200, "text/plain", "Device and Energy status is available under /status\r\n");
+    server.send(200, "text/plain", "To reset configuration, goto /reset\r\n");
   });
   server.on("/status", HTTP_GET, webStatus);
   server.on("/reset", HTTP_GET, webReset);
