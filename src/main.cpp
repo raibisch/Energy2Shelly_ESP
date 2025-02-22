@@ -1,10 +1,9 @@
-// Energy2Shelly_ESP v0.3
+// Energy2Shelly_ESP v0.4
 
-#include <FS.h>
-#include <WiFiManager.h>
-#ifdef ESP32
-  #include <SPIFFS.h>
+#ifndef ESP32
+  #include <Preferences.h>
 #endif
+#include <WiFiManager.h>
 #include <Arduino.h>
 #include <ESPAsyncTCP.h>
 #include <ArduinoJson.h>
@@ -37,6 +36,7 @@ IPAddress multicastIP(239, 12, 255, 254);
 
 //flag for saving WifiManager data
 bool shouldSaveConfig = false;
+Preferences preferences;
 
 //flags for data sources
 bool dataMQTT = false;
@@ -489,39 +489,14 @@ void WifiManagerSetup() {
   WiFi.macAddress(mac);
   sprintf (shelly_mac, "%02x%02x%02x%02x%02x%02x", mac [0], mac [1], mac [2], mac [3], mac [4], mac [5]);
 
-  JsonDocument json;
-  DEBUG_SERIAL.println("mounting FS...");
-
-  if (SPIFFS.begin()) {
-    DEBUG_SERIAL.println("mounted file system");
-    if (SPIFFS.exists("/config.json")) {
-      DEBUG_SERIAL.println("reading config file");
-      File configFile = SPIFFS.open("/config.json", "r");
-      if (configFile) {
-        DEBUG_SERIAL.println("opened config file");
-        size_t size = configFile.size();
-        std::unique_ptr<char[]> buf(new char[size]);
-        configFile.readBytes(buf.get(), size);
-        auto deserializeError = deserializeJson(json, buf.get());
-        serializeJson(json, Serial);
-        if ( ! deserializeError ) {
-          DEBUG_SERIAL.println("\nparsed json");
-          strcpy(mqtt_server, json["mqtt_server"]);
-          strcpy(mqtt_port, json["mqtt_port"]);
-          strcpy(mqtt_topic, json["mqtt_topic"]);
-          strcpy(mqtt_power_path, json["mqtt_power_path"]);
-          strcpy(mqtt_energy_in_path, json["mqtt_energy_in_path"]);
-          strcpy(mqtt_energy_out_path, json["mqtt_energy_out_path"]);
-          strcpy(shelly_mac, json["shelly_mac"]);
-          } else {
-          DEBUG_SERIAL.println("failed to load json config");
-        }
-        configFile.close();
-      }
-    }
-  } else {
-    DEBUG_SERIAL.println("failed to mount FS");
-  }
+  preferences.begin("e2s_config", false);
+  strcpy(mqtt_server, preferences.getString("mqtt_server", mqtt_server).c_str());
+  strcpy(mqtt_port, preferences.getString("mqtt_port", mqtt_port).c_str());
+  strcpy(mqtt_topic, preferences.getString("mqtt_topic", mqtt_topic).c_str());
+  strcpy(mqtt_power_path, preferences.getString("mqtt_power_path", mqtt_power_path).c_str());
+  strcpy(mqtt_energy_in_path, preferences.getString("mqtt_energy_in_path", mqtt_energy_in_path).c_str());
+  strcpy(mqtt_energy_out_path, preferences.getString("mqtt_energy_out_path", mqtt_energy_out_path).c_str());
+  strcpy(shelly_mac, preferences.getString("shelly_mac", shelly_mac).c_str());
   
   WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or \"SMA\" for SMA EM/HM Multicast", mqtt_server, 40);
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
@@ -564,7 +539,7 @@ void WifiManagerSetup() {
   strcpy(mqtt_energy_out_path, custom_mqtt_energy_out_path.getValue());
   strcpy(shelly_mac, custom_shelly_mac.getValue());
   
-  DEBUG_SERIAL.println("The values in the file are: ");
+  DEBUG_SERIAL.println("The values in the preferences are: ");
   DEBUG_SERIAL.println("\tmqtt_server : " + String(mqtt_server));
   DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
@@ -588,21 +563,13 @@ void WifiManagerSetup() {
 
   if (shouldSaveConfig) {
     DEBUG_SERIAL.println("saving config");
-    json["mqtt_server"] = mqtt_server;
-    json["mqtt_port"] = mqtt_port;
-    json["mqtt_topic"] = mqtt_topic;
-    json["mqtt_power_path"] = mqtt_power_path;
-    json["mqtt_energy_in_path"] = mqtt_energy_in_path;
-    json["mqtt_energy_out_path"] = mqtt_energy_out_path;
-    json["shelly_mac"] = shelly_mac;
-
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
-      DEBUG_SERIAL.println("failed to open config file for writing");
-    }
-    serializeJson(json, Serial);
-    serializeJson(json, configFile);
-    configFile.close();
+    preferences.putString("mqtt_server", mqtt_server);
+    preferences.putString("mqtt_port", mqtt_port);
+    preferences.putString("mqtt_topic", mqtt_topic);
+    preferences.putString("mqtt_power_path", mqtt_power_path);
+    preferences.putString("mqtt_energy_in_path", mqtt_energy_in_path);
+    preferences.putString("mqtt_energy_out_path", mqtt_energy_out_path);
+    preferences.putString("shelly_mac", shelly_mac);
   }
   DEBUG_SERIAL.println("local ip");
   DEBUG_SERIAL.println(WiFi.localIP());
@@ -610,8 +577,8 @@ void WifiManagerSetup() {
 
 void webReset() {
   server.send(200, "text/plain", "Resetting configuration, please log back into the hotspot to reconfigure...\r\n");
+  preferences.clear();
   delay(3000);
-  SPIFFS.remove("/config.json");
   WiFi.disconnect(true);
   ESP.restart();
 }
@@ -621,9 +588,7 @@ void setup(void) {
   WifiManagerSetup();
 
   server.on("/", []() {
-    server.send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\n");
-    server.send(200, "text/plain", "Device and Energy status is available under /status\r\n");
-    server.send(200, "text/plain", "To reset configuration, goto /reset\r\n");
+    server.send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
   });
   server.on("/status", HTTP_GET, webStatus);
   server.on("/reset", HTTP_GET, webReset);
