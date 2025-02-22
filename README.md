@@ -5,7 +5,9 @@ SMA Multicast code is based on https://www.mikrocontroller.net/topic/559607
 
 After flashing and power up, it opens a hotspot named "Energy2Shelly" running WifiManager for intial WiFi Setup.
 
-On the captive portal you can also enter MQTT Server IP, port and topic or enter "SMA" to use SMA Energy Meter or Home Manager multicast power data.
+On the captive portal you can also enter MQTT Server IP, port and topic or enter:
+- "SMA" to use SMA Energy Meter or Home Manager multicast power data
+- "SHRDZM" to use SHRDZM to use SHRDZM smart meter interface UDP unicast data
 
 Power values on the MQTT topic can be either a raw number or at a configurable JSON field using a JSON Path-style syntax, e.g. "energy.data" for {"energy":{"data":mypowervalue}}.
 
