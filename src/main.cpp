@@ -41,6 +41,7 @@ Preferences preferences;
 //flags for data sources
 bool dataMQTT = false;
 bool dataSMA = false;
+bool dataSHRDZM = false;
 
 struct PowerData
 {
@@ -483,6 +484,22 @@ void parseSMA() {
   }
 }
 
+void parseSHRDZM() {
+  JsonDocument json;
+  uint8_t buffer[1024];
+  int packetSize = Udp.parsePacket();
+  if (packetSize) {
+    int rSize = Udp.read(buffer, 1024);
+    buffer[rSize] = 0;
+    deserializeJson(json, buffer);
+    double power = json["data"]["16.7.0"];
+    setPowerData(power);
+    double energyIn = 0.001 * json["data"]["1.8.0"].as<double>();
+    double energyOut = 0.001 * json["data"]["2.8.0"].as<double>();
+    setEnergyData(energyIn,energyOut);
+  }
+}
+
 void WifiManagerSetup() {
   // Set Shelly ID to ESP's MAC address by default
   uint8_t mac[6];
@@ -498,7 +515,7 @@ void WifiManagerSetup() {
   strcpy(mqtt_energy_out_path, preferences.getString("mqtt_energy_out_path", mqtt_energy_out_path).c_str());
   strcpy(shelly_mac, preferences.getString("shelly_mac", shelly_mac).c_str());
   
-  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or \"SMA\" for SMA EM/HM Multicast", mqtt_server, 40);
+  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or \"SMA\" for SMA EM/HM Multicast or \"SHRDZM\" for SHRDZM UDP data", mqtt_server, 40);
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 60);
   WiFiManagerParameter custom_mqtt_power_path("power_path", "optional MQTT Power JSON path (e.g. \"ENERGY.Power\")", mqtt_power_path, 60);
@@ -551,6 +568,9 @@ void WifiManagerSetup() {
   if(strcmp(mqtt_server, "SMA") == 0) {
     dataSMA = true;
     DEBUG_SERIAL.println("Enabling SMA Multicast data input");
+  } else if (strcmp(mqtt_server, "SHRDZM") == 0) {
+    dataSHRDZM = true;
+    DEBUG_SERIAL.println("Enabling SHRDZM UDP data input");
   } else {
     dataMQTT = true;
     DEBUG_SERIAL.println("Enabling MQTT data input");
@@ -606,6 +626,11 @@ void setup(void) {
     #endif
   }
 
+  // Set Up UDP for SHRDZM smart meter interface
+  if(dataSHRDZM) {
+    Udp.begin(multicastPort);
+  }
+
   // Set up mDNS responder
   strcat(shelly_name,shelly_mac);
   if (!MDNS.begin(shelly_name)) {
@@ -659,5 +684,8 @@ void loop(void) {
   }
   if(dataSMA) {
     parseSMA();
+  }
+  if(dataSHRDZM) {
+    parseSHRDZM();
   }
 }
