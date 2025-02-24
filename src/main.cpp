@@ -1,4 +1,4 @@
-// Energy2Shelly_ESP v0.4.1
+// Energy2Shelly_ESP v0.4.2
 #include <Arduino.h>
 #include <Preferences.h>
 #ifndef ESP32
