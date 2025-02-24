@@ -1,16 +1,22 @@
-// Energy2Shelly_ESP v0.4
-
-#ifndef ESP32
-  #include <Preferences.h>
-#endif
-#include <WiFiManager.h>
+// Energy2Shelly_ESP v0.4.1
 #include <Arduino.h>
-#include <ESPAsyncTCP.h>
+#include <Preferences.h>
+#ifndef ESP32
+  #define WEBSERVER_H "fix conflict"
+#endif
+#ifdef ESP32
+  #include <AsyncTCP.h>
+  #include <ESPmDNS.h>
+  #include <WiFi.h>
+#else
+  #include <ESPAsyncTCP.h>
+  #include <ESP8266mDNS.h>
+#endif
 #include <ArduinoJson.h>
+#include <WiFiManager.h>
 #include <PubSubClient.h>
-#include <ESP8266mDNS.h>
 #include <WiFiClient.h>
-#include <WebSockets4WebServer.h>
+#include <ESPAsyncWebServer.h>
 #include <WiFiUdp.h>
 
 #define DEBUG true // set to false for no DEBUG output
@@ -63,15 +69,17 @@ PowerData PhasePower[3];
 EnergyData PhaseEnergy[3];
 String serJsonResponse;
 
-MDNSResponder::hMDNSService hMDNSService = 0; // handle of the http service in the MDNS responder
-MDNSResponder::hMDNSService hMDNSService2 = 0; // handle of the shelly service in the MDNS responder
-MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery = 0; // handle of the http service query
-MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery2 = 0; // handle of the shelly service query
+#ifndef ESP32
+  MDNSResponder::hMDNSService hMDNSService = 0; // handle of the http service in the MDNS responder
+  MDNSResponder::hMDNSService hMDNSService2 = 0; // handle of the shelly service in the MDNS responder
+  MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery = 0; // handle of the http service query
+  MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery2 = 0; // handle of the shelly service query
+#endif
 
 WiFiClient wifi_client;
 PubSubClient mqtt_client(wifi_client);
-ESP8266WebServer server(80);
-WebSockets4WebServer webSocket;
+static AsyncWebServer server(80);
+static AsyncWebSocket webSocket("/rpc");
 WiFiUDP Udp;
 
 double round2(double value) {
@@ -121,9 +129,11 @@ void saveConfigCallback () {
   shouldSaveConfig = true;
 }
 
-void MDNSServiceQueryCallback(MDNSResponder::MDNSServiceInfo serviceInfo, MDNSResponder::AnswerType answerType, bool p_bSetContent) {
-  // Nothing to do here
-}
+#ifndef ESP32
+  void MDNSServiceQueryCallback(MDNSResponder::MDNSServiceInfo serviceInfo, MDNSResponder::AnswerType answerType, bool p_bSetContent) {
+    // Nothing to do here
+  }
+#endif
 
 void GetDeviceInfo() {
   JsonDocument jsonResponse;
@@ -205,74 +215,64 @@ void EMGetConfig() {
   DEBUG_SERIAL.println(serJsonResponse);
 }
 
-void ShellyGetDeviceInfoHttp() {
+void ShellyGetDeviceInfoResponse(){
   GetDeviceInfo();
-  server.send(200,"application/json", serJsonResponse);
+  webSocket.textAll(serJsonResponse);
 }
 
-void ShellyGetDeviceInfoResponse(uint8_t num){
-  GetDeviceInfo();
-  webSocket.sendTXT(num, serJsonResponse);
-}
-
-void ShellyEMGetStatus(uint8_t num){
+void ShellyEMGetStatus(){
   EMGetStatus();
-  webSocket.sendTXT(num, serJsonResponse);
+  webSocket.textAll(serJsonResponse);
 }
 
-void ShellyEMDataGetStatus(uint8_t num) {
+void ShellyEMDataGetStatus() {
   EMDataGetStatus();
-  webSocket.sendTXT(num, serJsonResponse);
+  webSocket.textAll(serJsonResponse);
 }
 
-void ShellyEMGetConfig(uint8_t num) {
+void ShellyEMGetConfig() {
   EMGetConfig();
-  webSocket.sendTXT(num, serJsonResponse);
+  webSocket.textAll(serJsonResponse);
 }
 
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
   JsonDocument json;
   switch(type) {
-      case WStype_DISCONNECTED:
-          DEBUG_SERIAL.printf("[%u] Websocket: disconnected!\n", num);
-          break;
-      case WStype_CONNECTED:
-          {
-              IPAddress ip = webSocket.remoteIP(num);
-              DEBUG_SERIAL.printf("[%u] Websocket: connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
+    case WS_EVT_DISCONNECT:
+        DEBUG_SERIAL.printf("[%u] Websocket: disconnected!\n", client->id());
+        break;
+    case WS_EVT_CONNECT:
+        DEBUG_SERIAL.printf("[%u] Websocket: connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+        break;
+    case WS_EVT_DATA:
+        {
+          AwsFrameInfo *info = (AwsFrameInfo *)arg;
+          if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+            data[len] = 0;
+            deserializeJson(json, data);
+            rpcId = json["id"];
+            if (json["method"] == "Shelly.GetDeviceInfo") {
+              ShellyGetDeviceInfoResponse();
+            } else if(json["method"] == "EM.GetStatus") {
+              strcpy(rpcUser,json["src"]);
+              ShellyEMGetStatus();
+            } else if(json["method"] == "EMData.GetStatus") {
+              strcpy(rpcUser,json["src"]);
+              ShellyEMDataGetStatus();
+            } else if(json["method"] == "EM.GetConfig") {
+              ShellyEMGetConfig();
+            }
+            else {
+              DEBUG_SERIAL.printf("Websocket: unknown request: %s\n", data);
+            }
           }
           break;
-      case WStype_TEXT:
-          DEBUG_SERIAL.printf("[%u]Websocket: get Text: %s\n", num, payload);
-          deserializeJson(json,payload);
-          rpcId = json["id"];
-          if (json["method"] == "Shelly.GetDeviceInfo") {
-            ShellyGetDeviceInfoResponse(num);
-          } else if(json["method"] == "EM.GetStatus") {
-            strcpy(rpcUser,json["src"]);
-            ShellyEMGetStatus(num);
-          } else if(json["method"] == "EMData.GetStatus") {
-            strcpy(rpcUser,json["src"]);
-            ShellyEMDataGetStatus(num);
-          } else if(json["method"] == "EM.GetConfig") {
-            ShellyEMGetConfig(num);
-          }
-          else {
-            DEBUG_SERIAL.printf("[%u] Websocket: unknown request: %s\n", num, payload);
-          }
-          break;
-      default:
-          break;
+        }
+    case WS_EVT_PING:
+    case WS_EVT_PONG:
+    case WS_EVT_ERROR:
+        break;
   }
-}
-
-void webStatus() {
-  // GetDeviceInfo();
-  // server.send(200, "application/json", serJsonResponse );
-  EMGetStatus();
-  server.send(200, "application/json", serJsonResponse);
-  // EMDataGetStatus();
-  // server.send(200, "application/json", serJsonResponse);
 }
 
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
@@ -304,7 +304,7 @@ void mqtt_reconnect() {
       DEBUG_SERIAL.print(mqtt_client.state());
       DEBUG_SERIAL.println(" try again in 5 seconds");
       delay(5000);
-      server.handleClient(); // make /reset accessible if MQTT can't connect
+      //server.handleClient(); // make /reset accessible if MQTT can't connect
     }
   }
 }
@@ -595,25 +595,34 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println(WiFi.localIP());
 }
 
-void webReset() {
-  server.send(200, "text/plain", "Resetting configuration, please log back into the hotspot to reconfigure...\r\n");
-  preferences.clear();
-  delay(3000);
-  WiFi.disconnect(true);
-  ESP.restart();
-}
-
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
 
-  server.on("/", []() {
-    server.send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
   });
-  server.on("/status", HTTP_GET, webStatus);
-  server.on("/reset", HTTP_GET, webReset);
-  server.on("/rpc", ShellyGetDeviceInfoHttp);
-  server.addHook(webSocket.hookForWebserver("/rpc", webSocketEvent));
+
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EMGetStatus();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Resetting configuration, please log back into the hotspot to reconfigure...\r\n");
+    preferences.clear();
+    delay(3000);
+    WiFi.disconnect(true);
+    ESP.restart();  
+  });
+
+  server.on("/rpc", HTTP_ANY, [](AsyncWebServerRequest *request) {
+    GetDeviceInfo();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  webSocket.onEvent(webSocketEvent);
+  server.addHandler(&webSocket);
   server.begin();
 
   // Set Up Multicast for SMA Energy Meter
@@ -636,46 +645,61 @@ void setup(void) {
   if (!MDNS.begin(shelly_name)) {
     DEBUG_SERIAL.println("Error setting up MDNS responder!");
   }
-  hMDNSService = MDNS.addService(0, "http", "tcp", 80);
-  hMDNSService2 = MDNS.addService(0, "shelly", "tcp", 80);
-  
-  if (hMDNSService) {
-    MDNS.setServiceName(hMDNSService, shelly_name);
-    MDNS.addServiceTxt(hMDNSService, "fw_id", "20241011-114455/1.4.4-g6d2a586");
-    MDNS.addServiceTxt(hMDNSService, "arch", "esp8266");
-    MDNS.addServiceTxt(hMDNSService, "id", shelly_name);
-    MDNS.addServiceTxt(hMDNSService, "gen", "2");
-  }
-  if (hMDNSService2) {
-    MDNS.setServiceName(hMDNSService2, shelly_name);
-    MDNS.addServiceTxt(hMDNSService2, "fw_id", "20241011-114455/1.4.4-g6d2a586");
-    MDNS.addServiceTxt(hMDNSService2, "arch", "esp8266");
-    MDNS.addServiceTxt(hMDNSService2, "id", shelly_name);
-    MDNS.addServiceTxt(hMDNSService2, "gen", "2");
-  }
-  if (!hMDNSServiceQuery) {
-          hMDNSServiceQuery = MDNS.installServiceQuery("http", "tcp", MDNSServiceQueryCallback);
-          if (hMDNSServiceQuery) {
-            DEBUG_SERIAL.printf("MDNSProbeResultCallback: Service query for 'http.tcp' services installed.\n");
-          } else {
-            DEBUG_SERIAL.printf("MDNSProbeResultCallback: FAILED to install service query for 'http.tcp' services!\n");
-          }
-        }
-  if (!hMDNSServiceQuery2) {
-          hMDNSServiceQuery2 = MDNS.installServiceQuery("shelly", "tcp", MDNSServiceQueryCallback);
-          if (hMDNSServiceQuery2) {
-            DEBUG_SERIAL.printf("MDNSProbeResultCallback: Service query for 'shelly.tcp' services installed.\n");
-          } else {
-            DEBUG_SERIAL.printf("MDNSProbeResultCallback: FAILED to install service query for 'shelly.tcp' services!\n");
-          }
-        }
+
+  #ifdef ESP32
+    MDNS.addService("http", "tcp", 80);
+    MDNS.addService("shelly", "tcp", 80);
+    mdns_txt_item_t serviceTxtData[4] = {
+      {"fw_id","20241011-114455/1.4.4-g6d2a586"},
+      {"arch","esp8266"},
+      {"id",shelly_name},
+      {"gen","2"}
+    };
+    mdns_service_instance_name_set("_http", "_tcp", shelly_name);
+    mdns_service_txt_set("_http", "_tcp", serviceTxtData, 4);
+    mdns_service_instance_name_set("_shelly", "_tcp", shelly_name);
+    mdns_service_txt_set("_shelly", "_tcp", serviceTxtData, 4);
+  #else
+    hMDNSService = MDNS.addService(0, "http", "tcp", 80);
+    hMDNSService2 = MDNS.addService(0, "shelly", "tcp", 80);
+    if (hMDNSService) {
+      MDNS.setServiceName(hMDNSService, shelly_name);
+      MDNS.addServiceTxt(hMDNSService, "fw_id", "20241011-114455/1.4.4-g6d2a586");
+      MDNS.addServiceTxt(hMDNSService, "arch", "esp8266");
+      MDNS.addServiceTxt(hMDNSService, "id", shelly_name);
+      MDNS.addServiceTxt(hMDNSService, "gen", "2");
+    }
+    if (hMDNSService2) {
+      MDNS.setServiceName(hMDNSService2, shelly_name);
+      MDNS.addServiceTxt(hMDNSService2, "fw_id", "20241011-114455/1.4.4-g6d2a586");
+      MDNS.addServiceTxt(hMDNSService2, "arch", "esp8266");
+      MDNS.addServiceTxt(hMDNSService2, "id", shelly_name);
+      MDNS.addServiceTxt(hMDNSService2, "gen", "2");
+    }
+    if (!hMDNSServiceQuery) {
+      hMDNSServiceQuery = MDNS.installServiceQuery("http", "tcp", MDNSServiceQueryCallback);
+      if (hMDNSServiceQuery) {
+        DEBUG_SERIAL.printf("MDNSProbeResultCallback: Service query for 'http.tcp' services installed.\n");
+      } else {
+        DEBUG_SERIAL.printf("MDNSProbeResultCallback: FAILED to install service query for 'http.tcp' services!\n");
+      }
+    }
+    if (!hMDNSServiceQuery2) {
+      hMDNSServiceQuery2 = MDNS.installServiceQuery("shelly", "tcp", MDNSServiceQueryCallback);
+      if (hMDNSServiceQuery2) {
+        DEBUG_SERIAL.printf("MDNSProbeResultCallback: Service query for 'shelly.tcp' services installed.\n");
+      } else {
+        DEBUG_SERIAL.printf("MDNSProbeResultCallback: FAILED to install service query for 'shelly.tcp' services!\n");
+      }
+    }
+  #endif
   DEBUG_SERIAL.println("mDNS responder started");
 }
 
 void loop(void) {
-  server.handleClient();
-  webSocket.loop();
-  MDNS.update();
+  //server.handleClient();
+  //webSocket.loop();
+  //MDNS.update();
   if(dataMQTT) {
     if (!mqtt_client.connected()) {
       mqtt_reconnect();
