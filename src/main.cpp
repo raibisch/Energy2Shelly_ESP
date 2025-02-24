@@ -2,7 +2,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #ifndef ESP32
-  #define WEBSERVER_H "fix conflict"
+  #define WEBSERVER_H "fix WifiManager conflict"
 #endif
 #ifdef ESP32
   #include <AsyncTCP.h>
@@ -40,8 +40,10 @@ char rpcUser[20] = "user_1";
 unsigned int multicastPort = 9522;  // local port to listen on
 IPAddress multicastIP(239, 12, 255, 254);
 
-//flag for saving WifiManager data
+//flag for saving/resetting WifiManager data
 bool shouldSaveConfig = false;
+bool shouldResetConfig = false;
+
 Preferences preferences;
 
 //flags for data sources
@@ -72,8 +74,6 @@ String serJsonResponse;
 #ifndef ESP32
   MDNSResponder::hMDNSService hMDNSService = 0; // handle of the http service in the MDNS responder
   MDNSResponder::hMDNSService hMDNSService2 = 0; // handle of the shelly service in the MDNS responder
-  MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery = 0; // handle of the http service query
-  MDNSResponder::hMDNSServiceQuery hMDNSServiceQuery2 = 0; // handle of the shelly service query
 #endif
 
 WiFiClient wifi_client;
@@ -128,12 +128,6 @@ void saveConfigCallback () {
   DEBUG_SERIAL.println("Should save config");
   shouldSaveConfig = true;
 }
-
-#ifndef ESP32
-  void MDNSServiceQueryCallback(MDNSResponder::MDNSServiceInfo serviceInfo, MDNSResponder::AnswerType answerType, bool p_bSetContent) {
-    // Nothing to do here
-  }
-#endif
 
 void GetDeviceInfo() {
   JsonDocument jsonResponse;
@@ -304,7 +298,6 @@ void mqtt_reconnect() {
       DEBUG_SERIAL.print(mqtt_client.state());
       DEBUG_SERIAL.println(" try again in 5 seconds");
       delay(5000);
-      //server.handleClient(); // make /reset accessible if MQTT can't connect
     }
   }
 }
@@ -492,11 +485,15 @@ void parseSHRDZM() {
     int rSize = Udp.read(buffer, 1024);
     buffer[rSize] = 0;
     deserializeJson(json, buffer);
-    double power = json["data"]["16.7.0"];
-    setPowerData(power);
-    double energyIn = 0.001 * json["data"]["1.8.0"].as<double>();
-    double energyOut = 0.001 * json["data"]["2.8.0"].as<double>();
-    setEnergyData(energyIn,energyOut);
+    if (json["data"]["16.7.0"].is<JsonVariant>()) {
+      double power = json["data"]["16.7.0"];
+      setPowerData(power);
+    }
+    if (json["data"]["1.8.0"].is<JsonVariant>() && json["data"]["2.8.0"].is<JsonVariant>()) {
+      double energyIn = 0.001 * json["data"]["1.8.0"].as<double>();
+      double energyOut = 0.001 * json["data"]["2.8.0"].as<double>();
+      setEnergyData(energyIn,energyOut);
+    }
   }
 }
 
@@ -590,9 +587,11 @@ void WifiManagerSetup() {
     preferences.putString("mqtt_energy_in_path", mqtt_energy_in_path);
     preferences.putString("mqtt_energy_out_path", mqtt_energy_out_path);
     preferences.putString("shelly_mac", shelly_mac);
+    wifiManager.reboot();
   }
   DEBUG_SERIAL.println("local ip");
   DEBUG_SERIAL.println(WiFi.localIP());
+
 }
 
 void setup(void) {
@@ -609,14 +608,11 @@ void setup(void) {
   });
 
   server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Resetting configuration, please log back into the hotspot to reconfigure...\r\n");
-    preferences.clear();
-    delay(3000);
-    WiFi.disconnect(true);
-    ESP.restart();  
+    shouldResetConfig = true;
+    request->send(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
   });
 
-  server.on("/rpc", HTTP_ANY, [](AsyncWebServerRequest *request) {
+  server.on("/rpc", HTTP_POST, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
     request->send(200, "application/json", serJsonResponse);
   });
@@ -676,30 +672,11 @@ void setup(void) {
       MDNS.addServiceTxt(hMDNSService2, "id", shelly_name);
       MDNS.addServiceTxt(hMDNSService2, "gen", "2");
     }
-    if (!hMDNSServiceQuery) {
-      hMDNSServiceQuery = MDNS.installServiceQuery("http", "tcp", MDNSServiceQueryCallback);
-      if (hMDNSServiceQuery) {
-        DEBUG_SERIAL.printf("MDNSProbeResultCallback: Service query for 'http.tcp' services installed.\n");
-      } else {
-        DEBUG_SERIAL.printf("MDNSProbeResultCallback: FAILED to install service query for 'http.tcp' services!\n");
-      }
-    }
-    if (!hMDNSServiceQuery2) {
-      hMDNSServiceQuery2 = MDNS.installServiceQuery("shelly", "tcp", MDNSServiceQueryCallback);
-      if (hMDNSServiceQuery2) {
-        DEBUG_SERIAL.printf("MDNSProbeResultCallback: Service query for 'shelly.tcp' services installed.\n");
-      } else {
-        DEBUG_SERIAL.printf("MDNSProbeResultCallback: FAILED to install service query for 'shelly.tcp' services!\n");
-      }
-    }
   #endif
   DEBUG_SERIAL.println("mDNS responder started");
 }
 
 void loop(void) {
-  //server.handleClient();
-  //webSocket.loop();
-  //MDNS.update();
   if(dataMQTT) {
     if (!mqtt_client.connected()) {
       mqtt_reconnect();
@@ -711,5 +688,10 @@ void loop(void) {
   }
   if(dataSHRDZM) {
     parseSHRDZM();
+  }
+  if(shouldResetConfig) {
+    WiFi.disconnect(true);
+    delay(1000);
+    ESP.restart();  
   }
 }
