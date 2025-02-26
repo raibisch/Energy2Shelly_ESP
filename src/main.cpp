@@ -1,4 +1,4 @@
-// Energy2Shelly_ESP v0.4.2
+// Energy2Shelly_ESP v0.4.3
 #include <Arduino.h>
 #include <Preferences.h>
 #ifndef ESP32
@@ -725,6 +725,10 @@ void setup(void) {
 }
 
 void loop(void) {
+  #ifndef ESP32
+    MDNS.update();
+  #endif
+
   if(shouldResetConfig) {
     WiFi.disconnect(true);
     delay(1000);
