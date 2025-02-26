@@ -1,14 +1,16 @@
-// Energy2Shelly_ESP v0.4.2
+// Energy2Shelly_ESP v0.4.3
 #include <Arduino.h>
 #include <Preferences.h>
 #ifndef ESP32
   #define WEBSERVER_H "fix WifiManager conflict"
 #endif
 #ifdef ESP32
+  #include <HTTPClient.h>
   #include <AsyncTCP.h>
   #include <ESPmDNS.h>
   #include <WiFi.h>
 #else
+  #include <ESP8266HTTPClient.h>
   #include <ESPAsyncTCP.h>
   #include <ESP8266mDNS.h>
 #endif
@@ -22,17 +24,22 @@
 #define DEBUG true // set to false for no DEBUG output
 #define DEBUG_SERIAL if(DEBUG)Serial
 
+unsigned long startMillis;
+unsigned long currentMillis;
+
 //define your default values here, if there are different values in config.json, they are overwritten.
-char mqtt_server[40];
+char input_type[40];
+char mqtt_server[80];
 char mqtt_port[6] = "1883";
 char mqtt_topic[60] = "tele/meter/SENSOR";
-char mqtt_power_path[60] = "";
-char mqtt_energy_in_path[60] ="";
-char mqtt_energy_out_path[60] ="";
-
+char power_path[60] = "";
+char energy_in_path[60] ="";
+char energy_out_path[60] ="";
 char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
+char query_period[10] = "1000";
 
+unsigned long period = 1000;
 int rpcId = 1;
 char rpcUser[20] = "user_1";
 
@@ -50,6 +57,7 @@ Preferences preferences;
 bool dataMQTT = false;
 bool dataSMA = false;
 bool dataSHRDZM = false;
+bool dataHTTP = false;
 
 struct PowerData
 {
@@ -81,6 +89,7 @@ PubSubClient mqtt_client(wifi_client);
 static AsyncWebServer server(80);
 static AsyncWebSocket webSocket("/rpc");
 WiFiUDP Udp;
+HTTPClient http;
 
 double round2(double value) {
   return (int)(value * 100 + 0.5) / 100.0;
@@ -272,33 +281,30 @@ void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsE
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   JsonDocument json;
   deserializeJson(json, payload, length);
-  if (strcmp(mqtt_power_path, "") == 0) {
+  if (strcmp(power_path, "") == 0) {
     payload[length] = '\0';
     setPowerData(atof((char *)payload));
   } else {
-    double power = resolveJsonPath(json, mqtt_power_path);
+    double power = resolveJsonPath(json, power_path);
     setPowerData(power);
-    double energyIn = resolveJsonPath(json, mqtt_energy_in_path);
-    double energyOut = resolveJsonPath(json, mqtt_energy_out_path);
+    double energyIn = resolveJsonPath(json, energy_in_path);
+    double energyOut = resolveJsonPath(json, energy_out_path);
     setEnergyData(energyIn, energyOut);
-  } 
+  }
 }
 
 void mqtt_reconnect() {
-  while (!mqtt_client.connected()) {
-    DEBUG_SERIAL.print("Attempting MQTT connection...");
-    String clientId = "Energy2Shelly-" ;
-    clientId += shelly_mac;
-    if (mqtt_client.connect(clientId.c_str())) {
-      DEBUG_SERIAL.println("connected");
-      mqtt_client.publish(mqtt_topic, "Energy2Shelly online");
-      mqtt_client.subscribe(mqtt_topic);
-    } else {
-      DEBUG_SERIAL.print("failed, rc=");
-      DEBUG_SERIAL.print(mqtt_client.state());
-      DEBUG_SERIAL.println(" try again in 5 seconds");
-      delay(5000);
-    }
+  DEBUG_SERIAL.print("Attempting MQTT connection...");
+  String clientId = "Energy2Shelly-" ;
+  clientId += shelly_mac;
+  if (mqtt_client.connect(clientId.c_str())) {
+    DEBUG_SERIAL.println("connected");
+    mqtt_client.subscribe(mqtt_topic);
+  } else {
+    DEBUG_SERIAL.print("failed, rc=");
+    DEBUG_SERIAL.print(mqtt_client.state());
+    DEBUG_SERIAL.println(" try again in 5 seconds");
+    delay(5000);
   }
 }
 
@@ -497,6 +503,24 @@ void parseSHRDZM() {
   }
 }
 
+void queryHTTP() {
+  JsonDocument json;
+  DEBUG_SERIAL.println("Querying HTTP source");
+  http.begin(wifi_client, mqtt_server);
+  http.GET();
+  deserializeJson(json, http.getStream());
+  if (strcmp(power_path, "") == 0) {
+    DEBUG_SERIAL.println("no JSONPath for power data provided");
+  } else {
+    double power = resolveJsonPath(json, power_path);
+    setPowerData(power);
+    double energyIn = resolveJsonPath(json, energy_in_path);
+    double energyOut = resolveJsonPath(json, energy_out_path);
+    setEnergyData(energyIn, energyOut);
+  }
+  http.end();
+}
+
 void WifiManagerSetup() {
   // Set Shelly ID to ESP's MAC address by default
   uint8_t mac[6];
@@ -504,20 +528,24 @@ void WifiManagerSetup() {
   sprintf (shelly_mac, "%02x%02x%02x%02x%02x%02x", mac [0], mac [1], mac [2], mac [3], mac [4], mac [5]);
 
   preferences.begin("e2s_config", false);
+  strcpy(input_type, preferences.getString("input_type", input_type).c_str());
   strcpy(mqtt_server, preferences.getString("mqtt_server", mqtt_server).c_str());
   strcpy(mqtt_port, preferences.getString("mqtt_port", mqtt_port).c_str());
   strcpy(mqtt_topic, preferences.getString("mqtt_topic", mqtt_topic).c_str());
-  strcpy(mqtt_power_path, preferences.getString("mqtt_power_path", mqtt_power_path).c_str());
-  strcpy(mqtt_energy_in_path, preferences.getString("mqtt_energy_in_path", mqtt_energy_in_path).c_str());
-  strcpy(mqtt_energy_out_path, preferences.getString("mqtt_energy_out_path", mqtt_energy_out_path).c_str());
+  strcpy(power_path, preferences.getString("power_path", power_path).c_str());
+  strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
+  strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
+  strcpy(query_period, preferences.getString("query_period", query_period).c_str());
   strcpy(shelly_mac, preferences.getString("shelly_mac", shelly_mac).c_str());
   
-  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or \"SMA\" for SMA EM/HM Multicast or \"SHRDZM\" for SHRDZM UDP data", mqtt_server, 40);
+  WiFiManagerParameter custom_input_type("type", "\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM Multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
+  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 60);
-  WiFiManagerParameter custom_mqtt_power_path("power_path", "optional MQTT Power JSON path (e.g. \"ENERGY.Power\")", mqtt_power_path, 60);
-  WiFiManagerParameter custom_mqtt_energy_in_path("energy_in_path", "optional MQTT energy from grid JSON path (e.g. \"ENERGY.Grid\")", mqtt_energy_in_path, 60);
-  WiFiManagerParameter custom_mqtt_energy_out_path("energy_out_path", "optional MQTT energy to grid JSON path (e.g. \"ENERGY.FeedIn\")", mqtt_energy_out_path, 60);
+  WiFiManagerParameter custom_power_path("power_path", "optional power JSON path (e.g. \"ENERGY.Power\") for MQTT and generic HTTP", power_path, 60);
+  WiFiManagerParameter custom_energy_in_path("energy_in_path", "optional energy from grid JSON path (e.g. \"ENERGY.Grid\") for MQTT and generic HTTP", energy_in_path, 60);
+  WiFiManagerParameter custom_energy_out_path("energy_out_path", "optional energy to grid JSON path (e.g. \"ENERGY.FeedIn\") for MQTT and generic HTTP", energy_out_path, 60);
+  WiFiManagerParameter custom_query_period("query_period", "query period for generic HTTP", query_period, 10);
   WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
 
   WiFiManager wifiManager;
@@ -528,12 +556,14 @@ void WifiManagerSetup() {
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
   //add all your parameters here
+  wifiManager.addParameter(&custom_input_type);
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_topic);
-  wifiManager.addParameter(&custom_mqtt_power_path);
-  wifiManager.addParameter(&custom_mqtt_energy_in_path);
-  wifiManager.addParameter(&custom_mqtt_energy_out_path);
+  wifiManager.addParameter(&custom_power_path);
+  wifiManager.addParameter(&custom_energy_in_path);
+  wifiManager.addParameter(&custom_energy_out_path);
+  wifiManager.addParameter(&custom_query_period);
   wifiManager.addParameter(&custom_shelly_mac);
 
   if (!wifiManager.autoConnect("Energy2Shelly")) {
@@ -545,47 +575,52 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("connected");
 
   //read updated parameters
+  strcpy(input_type, custom_input_type.getValue());
   strcpy(mqtt_server, custom_mqtt_server.getValue());
   strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
-  strcpy(mqtt_power_path, custom_mqtt_power_path.getValue());
-  strcpy(mqtt_energy_in_path, custom_mqtt_energy_in_path.getValue());
-  strcpy(mqtt_energy_out_path, custom_mqtt_energy_out_path.getValue());
+  strcpy(power_path, custom_power_path.getValue());
+  strcpy(energy_in_path, custom_energy_in_path.getValue());
+  strcpy(energy_out_path, custom_energy_out_path.getValue());
+  strcpy(query_period, custom_query_period.getValue());
   strcpy(shelly_mac, custom_shelly_mac.getValue());
   
+
   DEBUG_SERIAL.println("The values in the preferences are: ");
+  DEBUG_SERIAL.println("\tinput_type : " + String(input_type));
   DEBUG_SERIAL.println("\tmqtt_server : " + String(mqtt_server));
   DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
-  DEBUG_SERIAL.println("\tmqtt_power_path : " + String(mqtt_power_path));
-  DEBUG_SERIAL.println("\tmqtt_energy_in_path : " + String(mqtt_energy_in_path));
-  DEBUG_SERIAL.println("\tmqtt_energy_out_path : " + String(mqtt_energy_out_path));
+  DEBUG_SERIAL.println("\tpower_path : " + String(power_path));
+  DEBUG_SERIAL.println("\tenergy_in_path : " + String(energy_in_path));
+  DEBUG_SERIAL.println("\tenergy_out_path : " + String(energy_out_path));
+  DEBUG_SERIAL.println("\tquery_period : " + String(query_period));
   DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
 
-  if(strcmp(mqtt_server, "SMA") == 0) {
+  if(strcmp(input_type, "SMA") == 0) {
     dataSMA = true;
     DEBUG_SERIAL.println("Enabling SMA Multicast data input");
-  } else if (strcmp(mqtt_server, "SHRDZM") == 0) {
+  } else if (strcmp(input_type, "SHRDZM") == 0) {
     dataSHRDZM = true;
     DEBUG_SERIAL.println("Enabling SHRDZM UDP data input");
+  } else if (strcmp(input_type, "HTTP") == 0) {
+    dataHTTP = true;
+    DEBUG_SERIAL.println("Enabling generic HTTP data input");
   } else {
     dataMQTT = true;
     DEBUG_SERIAL.println("Enabling MQTT data input");
   }
 
-  if(dataMQTT) {
-    mqtt_client.setServer(mqtt_server, String(mqtt_port).toInt());
-    mqtt_client.setCallback(mqtt_callback);
-  }
-
   if (shouldSaveConfig) {
     DEBUG_SERIAL.println("saving config");
+    preferences.putString("input_type", input_type);
     preferences.putString("mqtt_server", mqtt_server);
     preferences.putString("mqtt_port", mqtt_port);
     preferences.putString("mqtt_topic", mqtt_topic);
-    preferences.putString("mqtt_power_path", mqtt_power_path);
-    preferences.putString("mqtt_energy_in_path", mqtt_energy_in_path);
-    preferences.putString("mqtt_energy_out_path", mqtt_energy_out_path);
+    preferences.putString("power_path", power_path);
+    preferences.putString("energy_in_path", energy_in_path);
+    preferences.putString("energy_out_path", energy_out_path);
+    preferences.putString("query_period", query_period);
     preferences.putString("shelly_mac", shelly_mac);
     wifiManager.reboot();
   }
@@ -621,6 +656,12 @@ void setup(void) {
   server.addHandler(&webSocket);
   server.begin();
 
+  // Set up MQTT
+  if(dataMQTT) {
+    mqtt_client.setServer(mqtt_server, String(mqtt_port).toInt());
+    mqtt_client.setCallback(mqtt_callback);
+  }
+
   // Set Up Multicast for SMA Energy Meter
   if(dataSMA) {
     Udp.begin(multicastPort);
@@ -634,6 +675,13 @@ void setup(void) {
   // Set Up UDP for SHRDZM smart meter interface
   if(dataSHRDZM) {
     Udp.begin(multicastPort);
+  }
+
+  // Set Up HTTP query
+  if(dataHTTP) {
+    period = atol(query_period);
+    startMillis = millis();
+    http.useHTTP10(true);
   }
 
   // Set up mDNS responder
@@ -677,6 +725,15 @@ void setup(void) {
 }
 
 void loop(void) {
+  #ifndef ESP32
+    MDNS.update();
+  #endif
+
+  if(shouldResetConfig) {
+    WiFi.disconnect(true);
+    delay(1000);
+    ESP.restart();  
+  }
   if(dataMQTT) {
     if (!mqtt_client.connected()) {
       mqtt_reconnect();
@@ -688,10 +745,13 @@ void loop(void) {
   }
   if(dataSHRDZM) {
     parseSHRDZM();
+  
   }
-  if(shouldResetConfig) {
-    WiFi.disconnect(true);
-    delay(1000);
-    ESP.restart();  
+  if(dataHTTP) {
+    currentMillis = millis();
+    if (currentMillis - startMillis >= period) {
+      queryHTTP();
+      startMillis = currentMillis;
+    }
   }
 }
