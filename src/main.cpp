@@ -169,7 +169,9 @@ void EMGetStatus(){
   JsonDocument jsonResponse;
   jsonResponse["id"] = rpcId;
   jsonResponse["src"] = shelly_name;
-  jsonResponse["dst"] = rpcUser;
+  if (strcmp(rpcUser,"UDP") != 0) {
+    jsonResponse["dst"] = rpcUser;
+  }
   jsonResponse["result"]["id"] = 0;
   jsonResponse["result"]["a_current"] = PhasePower[0].current;
   jsonResponse["result"]["a_voltage"] = PhasePower[0].voltage;
@@ -189,7 +191,7 @@ void EMGetStatus(){
   jsonResponse["result"]["c_aprt_power"] = PhasePower[2].apparentPower;
   jsonResponse["result"]["c_pf"] = PhasePower[2].powerFactor;
   jsonResponse["result"]["c_freq"] = PhasePower[2].frequency;
-  jsonResponse["result"]["total_current"] = (PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / 230;
+  jsonResponse["result"]["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / 230);
   jsonResponse["result"]["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
   jsonResponse["result"]["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse,serJsonResponse);
@@ -200,7 +202,9 @@ void EMDataGetStatus() {
   JsonDocument jsonResponse;
   jsonResponse["id"] = rpcId;
   jsonResponse["src"] = shelly_name;
-  jsonResponse["dst"] = rpcUser;
+  if (strcmp(rpcUser,"UDP") != 0) {
+    jsonResponse["dst"] = rpcUser;
+  }
   jsonResponse["result"]["id"] = 0;
   jsonResponse["result"]["a_total_act_energy"] = PhaseEnergy[0].consumption;
   jsonResponse["result"]["a_total_act_ret_energy"] = PhaseEnergy[0].gridfeedin;
@@ -226,26 +230,6 @@ void EMGetConfig() {
   DEBUG_SERIAL.println(serJsonResponse);
 }
 
-void ShellyGetDeviceInfoResponse(){
-  GetDeviceInfo();
-  webSocket.textAll(serJsonResponse);
-}
-
-void ShellyEMGetStatus(){
-  EMGetStatus();
-  webSocket.textAll(serJsonResponse);
-}
-
-void ShellyEMDataGetStatus() {
-  EMDataGetStatus();
-  webSocket.textAll(serJsonResponse);
-}
-
-void ShellyEMGetConfig() {
-  EMGetConfig();
-  webSocket.textAll(serJsonResponse);
-}
-
 void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
   JsonDocument json;
   switch(type) {
@@ -263,15 +247,19 @@ void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsE
             deserializeJson(json, data);
             rpcId = json["id"];
             if (json["method"] == "Shelly.GetDeviceInfo") {
-              ShellyGetDeviceInfoResponse();
+              GetDeviceInfo();
+              webSocket.textAll(serJsonResponse);
             } else if(json["method"] == "EM.GetStatus") {
               strcpy(rpcUser,json["src"]);
-              ShellyEMGetStatus();
+              EMGetStatus();
+              webSocket.textAll(serJsonResponse);
             } else if(json["method"] == "EMData.GetStatus") {
               strcpy(rpcUser,json["src"]);
-              ShellyEMDataGetStatus();
+              EMDataGetStatus();
+              webSocket.textAll(serJsonResponse);
             } else if(json["method"] == "EM.GetConfig") {
-              ShellyEMGetConfig();
+              EMGetConfig();
+              webSocket.textAll(serJsonResponse);
             }
             else {
               DEBUG_SERIAL.printf("Websocket: unknown request: %s\n", data);
@@ -321,19 +309,20 @@ void parseUdpRPC() {
     JsonDocument json;
     int rSize = UdpRPC.read(buffer, 1024);
     buffer[rSize] = 0;
+    DEBUG_SERIAL.print("Received UDP packet on port 1010: ");
+    DEBUG_SERIAL.println((char *)buffer);
     deserializeJson(json, buffer);
     if (json["method"].is<JsonVariant>()) {
       rpcId = json["id"];
+      strcpy(rpcUser, "UDP");
       UdpRPC.beginPacket(UdpRPC.remoteIP(), UdpRPC.remotePort());
       if (json["method"] == "Shelly.GetDeviceInfo") {
         GetDeviceInfo();
         UdpRPC.UDPPRINT(serJsonResponse.c_str());
       } else if(json["method"] == "EM.GetStatus") {
-        strcpy(rpcUser,json["src"]);
         EMGetStatus();
         UdpRPC.UDPPRINT(serJsonResponse.c_str());
       } else if(json["method"] == "EMData.GetStatus") {
-        strcpy(rpcUser,json["src"]);
         EMDataGetStatus();
         UdpRPC.UDPPRINT(serJsonResponse.c_str());
       } else if(json["method"] == "EM.GetConfig") {
