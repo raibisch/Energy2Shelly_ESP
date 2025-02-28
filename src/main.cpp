@@ -1,4 +1,4 @@
-// Energy2Shelly_ESP v0.4.3
+// Energy2Shelly_ESP v0.4.4
 #include <Arduino.h>
 #include <Preferences.h>
 #ifndef ESP32
@@ -32,6 +32,8 @@ char input_type[40];
 char mqtt_server[80];
 char mqtt_port[6] = "1883";
 char mqtt_topic[60] = "tele/meter/SENSOR";
+char mqtt_user[20] = "";
+char mqtt_passwd[20] = "";
 char power_path[60] = "";
 char energy_in_path[60] ="";
 char energy_out_path[60] ="";
@@ -90,6 +92,12 @@ static AsyncWebServer server(80);
 static AsyncWebSocket webSocket("/rpc");
 WiFiUDP Udp;
 HTTPClient http;
+WiFiUDP UdpRPC;
+#ifdef ESP32
+  #define UDPPRINT print
+#else
+  #define UDPPRINT write
+#endif
 
 double round2(double value) {
   return (int)(value * 100 + 0.5) / 100.0;
@@ -295,9 +303,7 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 
 void mqtt_reconnect() {
   DEBUG_SERIAL.print("Attempting MQTT connection...");
-  String clientId = "Energy2Shelly-" ;
-  clientId += shelly_mac;
-  if (mqtt_client.connect(clientId.c_str())) {
+  if (mqtt_client.connect(shelly_name,mqtt_user,mqtt_passwd)) {
     DEBUG_SERIAL.println("connected");
     mqtt_client.subscribe(mqtt_topic);
   } else {
@@ -305,6 +311,40 @@ void mqtt_reconnect() {
     DEBUG_SERIAL.print(mqtt_client.state());
     DEBUG_SERIAL.println(" try again in 5 seconds");
     delay(5000);
+  }
+}
+
+void parseUdpRPC() {
+  uint8_t buffer[1024];
+  int packetSize = UdpRPC.parsePacket();
+  if (packetSize) {
+    JsonDocument json;
+    int rSize = UdpRPC.read(buffer, 1024);
+    buffer[rSize] = 0;
+    deserializeJson(json, buffer);
+    if (json["method"].is<JsonVariant>()) {
+      rpcId = json["id"];
+      UdpRPC.beginPacket(UdpRPC.remoteIP(), UdpRPC.remotePort());
+      if (json["method"] == "Shelly.GetDeviceInfo") {
+        GetDeviceInfo();
+        UdpRPC.UDPPRINT(serJsonResponse.c_str());
+      } else if(json["method"] == "EM.GetStatus") {
+        strcpy(rpcUser,json["src"]);
+        EMGetStatus();
+        UdpRPC.UDPPRINT(serJsonResponse.c_str());
+      } else if(json["method"] == "EMData.GetStatus") {
+        strcpy(rpcUser,json["src"]);
+        EMDataGetStatus();
+        UdpRPC.UDPPRINT(serJsonResponse.c_str());
+      } else if(json["method"] == "EM.GetConfig") {
+        EMGetConfig();
+        UdpRPC.UDPPRINT(serJsonResponse.c_str());
+      }
+      else {
+        DEBUG_SERIAL.printf("RPC over UDP: unknown request: %s\n", buffer);
+      }
+      UdpRPC.endPacket();
+    }
   }
 }
 
@@ -532,6 +572,8 @@ void WifiManagerSetup() {
   strcpy(mqtt_server, preferences.getString("mqtt_server", mqtt_server).c_str());
   strcpy(mqtt_port, preferences.getString("mqtt_port", mqtt_port).c_str());
   strcpy(mqtt_topic, preferences.getString("mqtt_topic", mqtt_topic).c_str());
+  strcpy(mqtt_user, preferences.getString("mqtt_user", mqtt_user).c_str());
+  strcpy(mqtt_passwd, preferences.getString("mqtt_passwd", mqtt_passwd).c_str());
   strcpy(power_path, preferences.getString("power_path", power_path).c_str());
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
@@ -542,9 +584,11 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 60);
-  WiFiManagerParameter custom_power_path("power_path", "optional power JSON path (e.g. \"ENERGY.Power\") for MQTT and generic HTTP", power_path, 60);
-  WiFiManagerParameter custom_energy_in_path("energy_in_path", "optional energy from grid JSON path (e.g. \"ENERGY.Grid\") for MQTT and generic HTTP", energy_in_path, 60);
-  WiFiManagerParameter custom_energy_out_path("energy_out_path", "optional energy to grid JSON path (e.g. \"ENERGY.FeedIn\") for MQTT and generic HTTP", energy_out_path, 60);
+  WiFiManagerParameter custom_mqtt_user("user", "MQTT user (optional)", mqtt_user, 20);
+  WiFiManagerParameter custom_mqtt_passwd("passwd", "MQTT password (optional)", mqtt_passwd, 20);
+  WiFiManagerParameter custom_power_path("power_path", "Power JSON path (e.g. \"ENERGY.Power\") for MQTT and generic HTTP (optional)", power_path, 60);
+  WiFiManagerParameter custom_energy_in_path("energy_in_path", "Energy from grid JSON path (e.g. \"ENERGY.Grid\") for MQTT and generic HTTP (optional)", energy_in_path, 60);
+  WiFiManagerParameter custom_energy_out_path("energy_out_path", "Energy to grid JSON path (e.g. \"ENERGY.FeedIn\") for MQTT and generic HTTP (optional)", energy_out_path, 60);
   WiFiManagerParameter custom_query_period("query_period", "query period for generic HTTP", query_period, 10);
   WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
 
@@ -560,6 +604,8 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_topic);
+  wifiManager.addParameter(&custom_mqtt_user);
+  wifiManager.addParameter(&custom_mqtt_passwd);
   wifiManager.addParameter(&custom_power_path);
   wifiManager.addParameter(&custom_energy_in_path);
   wifiManager.addParameter(&custom_energy_out_path);
@@ -579,6 +625,8 @@ void WifiManagerSetup() {
   strcpy(mqtt_server, custom_mqtt_server.getValue());
   strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
+  strcpy(mqtt_user, custom_mqtt_user.getValue());
+  strcpy(mqtt_passwd, custom_mqtt_passwd.getValue());
   strcpy(power_path, custom_power_path.getValue());
   strcpy(energy_in_path, custom_energy_in_path.getValue());
   strcpy(energy_out_path, custom_energy_out_path.getValue());
@@ -591,6 +639,8 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tmqtt_server : " + String(mqtt_server));
   DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
+  DEBUG_SERIAL.println("\tmqtt_user : " + String(mqtt_user));
+  DEBUG_SERIAL.println("\tmqtt_passwd : " + String(mqtt_passwd));
   DEBUG_SERIAL.println("\tpower_path : " + String(power_path));
   DEBUG_SERIAL.println("\tenergy_in_path : " + String(energy_in_path));
   DEBUG_SERIAL.println("\tenergy_out_path : " + String(energy_out_path));
@@ -617,6 +667,8 @@ void WifiManagerSetup() {
     preferences.putString("mqtt_server", mqtt_server);
     preferences.putString("mqtt_port", mqtt_port);
     preferences.putString("mqtt_topic", mqtt_topic);
+    preferences.putString("mqtt_user", mqtt_user);
+    preferences.putString("mqtt_passwd", mqtt_passwd);
     preferences.putString("power_path", power_path);
     preferences.putString("energy_in_path", energy_in_path);
     preferences.putString("energy_out_path", energy_out_path);
@@ -655,6 +707,9 @@ void setup(void) {
   webSocket.onEvent(webSocketEvent);
   server.addHandler(&webSocket);
   server.begin();
+
+  // Set up RPC over UDP for Marstek users
+  UdpRPC.begin(1010);
 
   // Set up MQTT
   if(dataMQTT) {
@@ -728,7 +783,7 @@ void loop(void) {
   #ifndef ESP32
     MDNS.update();
   #endif
-
+  parseUdpRPC();
   if(shouldResetConfig) {
     WiFi.disconnect(true);
     delay(1000);
