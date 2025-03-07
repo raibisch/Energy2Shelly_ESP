@@ -35,6 +35,9 @@ char mqtt_topic[60] = "tele/meter/SENSOR";
 char mqtt_user[20] = "";
 char mqtt_passwd[20] = "";
 char power_path[60] = "";
+char power_l1_path[60] = "";
+char power_l2_path[60] = "";
+char power_l3_path[60] = "";
 char energy_in_path[60] ="";
 char energy_out_path[60] ="";
 char shelly_mac[13];
@@ -129,6 +132,25 @@ void setPowerData(double totalPower) {
   DEBUG_SERIAL.println(totalPower);
 }
 
+void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
+  PhasePower[0].power = round2(phase1Power);
+  PhasePower[1].power = round2(phase2Power);
+  PhasePower[2].power = round2(phase3Power);
+  for(int i=0;i<=2;i++) {
+    PhasePower[i].voltage = 230;
+    PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
+    PhasePower[i].apparentPower = PhasePower[i].power;
+    PhasePower[i].powerFactor = 1;
+    PhasePower[i].frequency = 50;
+  }
+  DEBUG_SERIAL.print("Current power L1: ");
+  DEBUG_SERIAL.print(phase1Power);
+  DEBUG_SERIAL.print(" - L2: ");
+  DEBUG_SERIAL.print(phase2Power);
+  DEBUG_SERIAL.print(" - L3: ");
+  DEBUG_SERIAL.println(phase3Power);
+}
+
 void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {    
   for(int i=0;i<=2;i++) {
     PhaseEnergy[i].consumption = round2(totalEnergyGridSupply * 0.3333);
@@ -144,6 +166,25 @@ void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
 void saveConfigCallback () {
   DEBUG_SERIAL.println("Should save config");
   shouldSaveConfig = true;
+}
+
+void setJsonPathPower(JsonDocument json){
+  if (strcmp(power_path, "TRIPHASE") == 0) {
+    DEBUG_SERIAL.println("resolving triphase");
+      double power1 = resolveJsonPath(json, power_l1_path);
+      double power2 = resolveJsonPath(json, power_l2_path);
+      double power3 = resolveJsonPath(json, power_l3_path);
+      setPowerData(power1, power2, power3);
+  } else {
+        DEBUG_SERIAL.println("resolving monophase");
+    double power = resolveJsonPath(json, power_path);
+    setPowerData(power);
+  }
+  if ((strcmp(energy_in_path, "") != 0) && (strcmp(energy_out_path, "") != 0)) {
+    double energyIn = resolveJsonPath(json, energy_in_path);
+    double energyOut = resolveJsonPath(json, energy_out_path);
+    setEnergyData(energyIn, energyOut);
+  }
 }
 
 void GetDeviceInfo() {
@@ -277,22 +318,36 @@ void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsE
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   JsonDocument json;
   deserializeJson(json, payload, length);
-  if (strcmp(power_path, "") == 0) {
+/*  if (strcmp(power_path, "") == 0) {
     payload[length] = '\0';
     setPowerData(atof((char *)payload));
-  } else {
-    double power = resolveJsonPath(json, power_path);
-    setPowerData(power);
-    double energyIn = resolveJsonPath(json, energy_in_path);
-    double energyOut = resolveJsonPath(json, energy_out_path);
-    setEnergyData(energyIn, energyOut);
-  }
+  } else {*/
+    //setJsonPathPower(json);
+    if (strcmp(power_path, "TRIPHASE") == 0) {
+      DEBUG_SERIAL.println("resolving triphase");
+      double power1 = resolveJsonPath(json, power_l1_path);
+      double power2 = resolveJsonPath(json, power_l2_path);
+      double power3 = resolveJsonPath(json, power_l3_path);
+      setPowerData(power1, power2, power3);
+    } else {
+      DEBUG_SERIAL.println("resolving monophase");
+      double power = resolveJsonPath(json, power_path);
+      setPowerData(power);
+    }
+    if ((strcmp(energy_in_path, "") != 0) && (strcmp(energy_out_path, "") != 0)) {
+      double energyIn = resolveJsonPath(json, energy_in_path);
+      double energyOut = resolveJsonPath(json, energy_out_path);
+      setEnergyData(energyIn, energyOut);
+    }
+  //} 
 }
 
 void mqtt_reconnect() {
   DEBUG_SERIAL.print("Attempting MQTT connection...");
-
-  if (mqtt_client.connect(shelly_name, String(mqtt_user).c_str(), String(mqtt_passwd).c_str())) {
+  String clientId ="E2S-";
+  clientId += shelly_mac;
+  if (mqtt_client.connect(clientId.c_str(), String(mqtt_user).c_str(), String(mqtt_passwd).c_str())) {
+  //if (mqtt_client.connect(clientId.c_str())) {
     DEBUG_SERIAL.println("connected");
     mqtt_client.subscribe(mqtt_topic);
   } else {
@@ -540,13 +595,9 @@ void queryHTTP() {
   http.GET();
   deserializeJson(json, http.getStream());
   if (strcmp(power_path, "") == 0) {
-    DEBUG_SERIAL.println("no JSONPath for power data provided");
+    DEBUG_SERIAL.println("HTTP query: no JSONPath for power data provided");
   } else {
-    double power = resolveJsonPath(json, power_path);
-    setPowerData(power);
-    double energyIn = resolveJsonPath(json, energy_in_path);
-    double energyOut = resolveJsonPath(json, energy_out_path);
-    setEnergyData(energyIn, energyOut);
+    setJsonPathPower(json);
   }
   http.end();
 }
@@ -560,27 +611,37 @@ void WifiManagerSetup() {
   preferences.begin("e2s_config", false);
   strcpy(input_type, preferences.getString("input_type", input_type).c_str());
   strcpy(mqtt_server, preferences.getString("mqtt_server", mqtt_server).c_str());
+  strcpy(query_period, preferences.getString("query_period", query_period).c_str());
+  strcpy(shelly_mac, preferences.getString("shelly_mac", shelly_mac).c_str());
   strcpy(mqtt_port, preferences.getString("mqtt_port", mqtt_port).c_str());
   strcpy(mqtt_topic, preferences.getString("mqtt_topic", mqtt_topic).c_str());
   strcpy(mqtt_user, preferences.getString("mqtt_user", mqtt_user).c_str());
   strcpy(mqtt_passwd, preferences.getString("mqtt_passwd", mqtt_passwd).c_str());
   strcpy(power_path, preferences.getString("power_path", power_path).c_str());
+  strcpy(power_l1_path, preferences.getString("power_l1_path", power_l1_path).c_str());
+  strcpy(power_l2_path, preferences.getString("power_l2_path", power_l2_path).c_str());
+  strcpy(power_l3_path, preferences.getString("power_l3_path", power_l3_path).c_str());
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
-  strcpy(query_period, preferences.getString("query_period", query_period).c_str());
-  strcpy(shelly_mac, preferences.getString("shelly_mac", shelly_mac).c_str());
   
+  WiFiManagerParameter custom_section1("<h4>General settings</h4>");
   WiFiManagerParameter custom_input_type("type", "\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM Multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
   WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
+  WiFiManagerParameter custom_query_period("query_period", "query period for generic HTTP in milliseconds", query_period, 10);
+  WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
+  WiFiManagerParameter custom_section2("<h4>MQTT options</h4>");
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 60);
   WiFiManagerParameter custom_mqtt_user("user", "MQTT user (optional)", mqtt_user, 20);
   WiFiManagerParameter custom_mqtt_passwd("passwd", "MQTT password (optional)", mqtt_passwd, 20);
-  WiFiManagerParameter custom_power_path("power_path", "Power JSON path (e.g. \"ENERGY.Power\") for MQTT and generic HTTP (optional)", power_path, 60);
-  WiFiManagerParameter custom_energy_in_path("energy_in_path", "Energy from grid JSON path (e.g. \"ENERGY.Grid\") for MQTT and generic HTTP (optional)", energy_in_path, 60);
-  WiFiManagerParameter custom_energy_out_path("energy_out_path", "Energy to grid JSON path (e.g. \"ENERGY.FeedIn\") for MQTT and generic HTTP (optional)", energy_out_path, 60);
-  WiFiManagerParameter custom_query_period("query_period", "query period for generic HTTP", query_period, 10);
-  WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
+  WiFiManagerParameter custom_section3("<h4>JSON Path options for MQTT and generic HTTP</h4>");
+  WiFiManagerParameter custom_power_path("power_path", "Total power JSON path (e.g. \"ENERGY.Power\") or \"TRIPHASE\" for tri-phase data", power_path, 60);
+  WiFiManagerParameter custom_power_l1_path("power_l1_path", "Phase 1 power JSON path (optional)", power_l1_path, 60);
+  WiFiManagerParameter custom_power_l2_path("power_l2_path", "Phase 2 power JSON path (optional)", power_l2_path, 60);
+  WiFiManagerParameter custom_power_l3_path("power_l3_path", "Phase 3 power JSON path (optional)", power_l3_path, 60);
+  WiFiManagerParameter custom_energy_in_path("energy_in_path", "Energy from grid JSON path (e.g. \"ENERGY.Grid\")", energy_in_path, 60);
+  WiFiManagerParameter custom_energy_out_path("energy_out_path", "Energy to grid JSON path (e.g. \"ENERGY.FeedIn\")", energy_out_path, 60);
+
 
   WiFiManager wifiManager;
   if(!DEBUG) {
@@ -590,17 +651,24 @@ void WifiManagerSetup() {
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
   //add all your parameters here
+  wifiManager.addParameter(&custom_section1);
   wifiManager.addParameter(&custom_input_type);
   wifiManager.addParameter(&custom_mqtt_server);
+  wifiManager.addParameter(&custom_query_period);
+  wifiManager.addParameter(&custom_shelly_mac);
+  wifiManager.addParameter(&custom_section2);
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_topic);
   wifiManager.addParameter(&custom_mqtt_user);
   wifiManager.addParameter(&custom_mqtt_passwd);
+  wifiManager.addParameter(&custom_section3);
   wifiManager.addParameter(&custom_power_path);
+  wifiManager.addParameter(&custom_power_l1_path);
+  wifiManager.addParameter(&custom_power_l2_path);
+  wifiManager.addParameter(&custom_power_l3_path);
   wifiManager.addParameter(&custom_energy_in_path);
   wifiManager.addParameter(&custom_energy_out_path);
-  wifiManager.addParameter(&custom_query_period);
-  wifiManager.addParameter(&custom_shelly_mac);
+
 
   if (!wifiManager.autoConnect("Energy2Shelly")) {
     DEBUG_SERIAL.println("failed to connect and hit timeout");
@@ -613,29 +681,35 @@ void WifiManagerSetup() {
   //read updated parameters
   strcpy(input_type, custom_input_type.getValue());
   strcpy(mqtt_server, custom_mqtt_server.getValue());
+  strcpy(query_period, custom_query_period.getValue());
+  strcpy(shelly_mac, custom_shelly_mac.getValue());
   strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
   strcpy(mqtt_user, custom_mqtt_user.getValue());
   strcpy(mqtt_passwd, custom_mqtt_passwd.getValue());
   strcpy(power_path, custom_power_path.getValue());
+  strcpy(power_l1_path, custom_power_l1_path.getValue());
+  strcpy(power_l2_path, custom_power_l2_path.getValue());
+  strcpy(power_l3_path, custom_power_l3_path.getValue());
   strcpy(energy_in_path, custom_energy_in_path.getValue());
   strcpy(energy_out_path, custom_energy_out_path.getValue());
-  strcpy(query_period, custom_query_period.getValue());
-  strcpy(shelly_mac, custom_shelly_mac.getValue());
-  
 
   DEBUG_SERIAL.println("The values in the preferences are: ");
   DEBUG_SERIAL.println("\tinput_type : " + String(input_type));
   DEBUG_SERIAL.println("\tmqtt_server : " + String(mqtt_server));
+  DEBUG_SERIAL.println("\tquery_period : " + String(query_period));
+  DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
   DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
   DEBUG_SERIAL.println("\tmqtt_user : " + String(mqtt_user));
   DEBUG_SERIAL.println("\tmqtt_passwd : " + String(mqtt_passwd));
   DEBUG_SERIAL.println("\tpower_path : " + String(power_path));
+  DEBUG_SERIAL.println("\tpower_l1_path : " + String(power_l1_path));
+  DEBUG_SERIAL.println("\tpower_l2_path : " + String(power_l2_path));
+  DEBUG_SERIAL.println("\tpower_l3_path : " + String(power_l3_path));
   DEBUG_SERIAL.println("\tenergy_in_path : " + String(energy_in_path));
   DEBUG_SERIAL.println("\tenergy_out_path : " + String(energy_out_path));
-  DEBUG_SERIAL.println("\tquery_period : " + String(query_period));
-  DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
+
 
   if(strcmp(input_type, "SMA") == 0) {
     dataSMA = true;
@@ -655,20 +729,22 @@ void WifiManagerSetup() {
     DEBUG_SERIAL.println("saving config");
     preferences.putString("input_type", input_type);
     preferences.putString("mqtt_server", mqtt_server);
+    preferences.putString("query_period", query_period);
+    preferences.putString("shelly_mac", shelly_mac);
     preferences.putString("mqtt_port", mqtt_port);
     preferences.putString("mqtt_topic", mqtt_topic);
     preferences.putString("mqtt_user", mqtt_user);
     preferences.putString("mqtt_passwd", mqtt_passwd);
     preferences.putString("power_path", power_path);
+    preferences.putString("power_l1_path", power_l1_path);
+    preferences.putString("power_l2_path", power_l2_path);
+    preferences.putString("power_l3_path", power_l3_path);
     preferences.putString("energy_in_path", energy_in_path);
     preferences.putString("energy_out_path", energy_out_path);
-    preferences.putString("query_period", query_period);
-    preferences.putString("shelly_mac", shelly_mac);
     wifiManager.reboot();
   }
   DEBUG_SERIAL.println("local ip");
   DEBUG_SERIAL.println(WiFi.localIP());
-
 }
 
 void setup(void) {
