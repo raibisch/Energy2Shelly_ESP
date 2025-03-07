@@ -1,4 +1,4 @@
-// Energy2Shelly_ESP v0.4.4
+// Energy2Shelly_ESP v0.4.5
 #include <Arduino.h>
 #include <Preferences.h>
 #ifndef ESP32
@@ -168,15 +168,15 @@ void saveConfigCallback () {
   shouldSaveConfig = true;
 }
 
-void setJsonPathPower(JsonDocument json){
+void setJsonPathPower(JsonDocument json) {
   if (strcmp(power_path, "TRIPHASE") == 0) {
     DEBUG_SERIAL.println("resolving triphase");
-      double power1 = resolveJsonPath(json, power_l1_path);
-      double power2 = resolveJsonPath(json, power_l2_path);
-      double power3 = resolveJsonPath(json, power_l3_path);
-      setPowerData(power1, power2, power3);
+    double power1 = resolveJsonPath(json, power_l1_path);
+    double power2 = resolveJsonPath(json, power_l2_path);
+    double power3 = resolveJsonPath(json, power_l3_path);
+    setPowerData(power1, power2, power3);
   } else {
-        DEBUG_SERIAL.println("resolving monophase");
+    DEBUG_SERIAL.println("resolving monophase");
     double power = resolveJsonPath(json, power_path);
     setPowerData(power);
   }
@@ -318,36 +318,12 @@ void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsE
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   JsonDocument json;
   deserializeJson(json, payload, length);
-/*  if (strcmp(power_path, "") == 0) {
-    payload[length] = '\0';
-    setPowerData(atof((char *)payload));
-  } else {*/
-    //setJsonPathPower(json);
-    if (strcmp(power_path, "TRIPHASE") == 0) {
-      DEBUG_SERIAL.println("resolving triphase");
-      double power1 = resolveJsonPath(json, power_l1_path);
-      double power2 = resolveJsonPath(json, power_l2_path);
-      double power3 = resolveJsonPath(json, power_l3_path);
-      setPowerData(power1, power2, power3);
-    } else {
-      DEBUG_SERIAL.println("resolving monophase");
-      double power = resolveJsonPath(json, power_path);
-      setPowerData(power);
-    }
-    if ((strcmp(energy_in_path, "") != 0) && (strcmp(energy_out_path, "") != 0)) {
-      double energyIn = resolveJsonPath(json, energy_in_path);
-      double energyOut = resolveJsonPath(json, energy_out_path);
-      setEnergyData(energyIn, energyOut);
-    }
-  //} 
+  setJsonPathPower(json);
 }
 
 void mqtt_reconnect() {
   DEBUG_SERIAL.print("Attempting MQTT connection...");
-  String clientId ="E2S-";
-  clientId += shelly_mac;
-  if (mqtt_client.connect(clientId.c_str(), String(mqtt_user).c_str(), String(mqtt_passwd).c_str())) {
-  //if (mqtt_client.connect(clientId.c_str())) {
+  if (mqtt_client.connect(shelly_name, String(mqtt_user).c_str(), String(mqtt_passwd).c_str())) {
     DEBUG_SERIAL.println("connected");
     mqtt_client.subscribe(mqtt_topic);
   } else {
