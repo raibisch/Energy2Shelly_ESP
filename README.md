@@ -46,7 +46,21 @@ First, sorry. This software is not perfect.
 - Which branch, what microcontroller, what setup
 - Steps to reproduce the problem, with actual vs. expected results
 - If you find a bug in our code, post the files and the lines.
+<br>
+<br>
 
-# screenshots
-> [!NOTE]
-> will be submitted later
+# some screenshots from project
+  ![wifi](./screenshots/screenshot_01.png)
+
+  ### Settings
+  ![settings](./screenshots/screenshot_02.png)
+  ![settings](./screenshots/screenshot_03.png)
+
+  ### main page <code>http://IP-address</code>
+  ![main](./screenshots/screenshot_04.png)
+
+  ### status page <code>http://IP-address/status</code>
+  ![status](./screenshots/screenshot_05.png)
+
+  > [!NOTE]
+> Images may vary depending on the version. We always try to be up to date.
