@@ -1,4 +1,4 @@
-// Energy2Shelly_ESP v0.4.5
+// Energy2Shelly_ESP v0.4.6
 #include <Arduino.h>
 #include <Preferences.h>
 #ifndef ESP32
@@ -117,7 +117,7 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
   return variant[path];
 }
 
-void setPowerData(double totalPower) {    
+void setPowerData(double totalPower) {
   PhasePower[0].power = round2(totalPower * 0.3333);
   PhasePower[1].power = round2(totalPower * 0.3333);
   PhasePower[2].power = round2(totalPower * 0.3333);
@@ -447,77 +447,71 @@ void parseSMA() {
                     case 2:
                       // 2.4.0 Total feed-in power in dW - unused
                       break;
-                    case 14:
-                     // Not sure why this doesn't work here...
-                     for(int i=0;i<=2;i++) {
-                       PhasePower[i].frequency = data * 0.001;
-                     }
-                     break;
                     case 21:
-                      PhasePower[0].power = data * 0.1;
-                      PhasePower[0].frequency = 50; // workaround
+                      PhasePower[0].power = round2(data * 0.1);
+                      PhasePower[0].frequency = 50;
                       break;
                     case 22:
-                      PhasePower[0].power -= data * 0.1;
+                      PhasePower[0].power -= round2(data * 0.1);
                       break;
                     case 29:
-                      PhasePower[0].apparentPower = data * 0.1;
+                      PhasePower[0].apparentPower = round2(data * 0.1);
                       break;
                     case 30:
-                      PhasePower[0].apparentPower -= data * 0.1;
+                      PhasePower[0].apparentPower -= round2(data * 0.1);
                       break;
                     case 31:
-                      PhasePower[0].current = data * 0.001;
+                      PhasePower[0].current = round2(data * 0.001);
                       break;
                     case 32:
-                      PhasePower[0].voltage = data * 0.001;
+                      PhasePower[0].voltage = round2(data * 0.001);
                       break;
                     case 33:
-                      PhasePower[0].powerFactor = data * 0.001;
+                      PhasePower[0].powerFactor = round2(data * 0.001);
                       break;
                     case 41:
-                      PhasePower[1].power = data * 0.1;
-                      PhasePower[1].frequency = 50; // workaround
+                      PhasePower[1].power = round2(data * 0.1);
+                      PhasePower[1].frequency = 50;
                       break;
                     case 42:
-                      PhasePower[1].power -= data * 0.1;
+                      PhasePower[1].power -= round2(data * 0.1);
                       break;
                     case 49:
-                      PhasePower[1].apparentPower = data * 0.1;
+                      PhasePower[1].apparentPower = round2(data * 0.1);
                       break;
                     case 50:
-                      PhasePower[1].apparentPower -= data * 0.1;
+                      PhasePower[1].apparentPower -= round2(data * 0.1);
                       break;
                     case 51:
-                      PhasePower[1].current = data * 0.001;
+                      PhasePower[1].current = round2(data * 0.001);
                       break;
                     case 52:
-                      PhasePower[1].voltage = data * 0.001;
+                      PhasePower[1].voltage = round2(data * 0.001);
                       break;
                     case 53:
-                      PhasePower[1].powerFactor = data * 0.001;
+                      PhasePower[1].powerFactor = round2(data * 0.001);
                       break;
                     case 61:
-                      PhasePower[2].power = data * 0.1;
-                      PhasePower[2].frequency = 50; // workaround
+                      PhasePower[2].power = round2(data * 0.1);
+                      PhasePower[2].frequency = 50;
                       break;
                     case 62:
-                      PhasePower[2].power -= data * 0.1;
+                      PhasePower[2].power -= round2(data * 0.1);
                       break;
                     case 69:
-                      PhasePower[2].apparentPower = data * 0.1;
+                      PhasePower[2].apparentPower = round2(data * 0.1);
                       break;
                     case 70:
-                      PhasePower[2].apparentPower -= data * 0.1;
+                      PhasePower[2].apparentPower -= round2(data * 0.1);
                       break;
                     case 71:
-                      PhasePower[2].current = data * 0.001;
+                      PhasePower[2].current = round2(data * 0.001);
                       break;
                     case 72:
-                      PhasePower[2].voltage = data * 0.001;
+                      PhasePower[2].voltage = round2(data * 0.001);
                       break;
                     case 73:
-                      PhasePower[2].powerFactor = data * 0.001;
+                      PhasePower[2].powerFactor = round2(data * 0.001);
                       break;
                     default:
                       break;
@@ -600,30 +594,29 @@ void WifiManagerSetup() {
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
   
-  WiFiManagerParameter custom_section1("<h4>General settings</h4>");
-  WiFiManagerParameter custom_input_type("type", "\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM Multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
-  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
-  WiFiManagerParameter custom_query_period("query_period", "query period for generic HTTP in milliseconds", query_period, 10);
-  WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
-  WiFiManagerParameter custom_section2("<h4>MQTT options</h4>");
-  WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
-  WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 60);
-  WiFiManagerParameter custom_mqtt_user("user", "MQTT user (optional)", mqtt_user, 40);
-  WiFiManagerParameter custom_mqtt_passwd("passwd", "MQTT password (optional)", mqtt_passwd, 40);
-  WiFiManagerParameter custom_section3("<h4>JSON Path options for MQTT and generic HTTP</h4>");
-  WiFiManagerParameter custom_power_path("power_path", "Total power JSON path (e.g. \"ENERGY.Power\") or \"TRIPHASE\" for tri-phase data", power_path, 60);
-  WiFiManagerParameter custom_power_l1_path("power_l1_path", "Phase 1 power JSON path (optional)", power_l1_path, 60);
-  WiFiManagerParameter custom_power_l2_path("power_l2_path", "Phase 2 power JSON path (optional)", power_l2_path, 60);
-  WiFiManagerParameter custom_power_l3_path("power_l3_path", "Phase 3 power JSON path (optional)", power_l3_path, 60);
-  WiFiManagerParameter custom_energy_in_path("energy_in_path", "Energy from grid JSON path (e.g. \"ENERGY.Grid\")", energy_in_path, 60);
-  WiFiManagerParameter custom_energy_out_path("energy_out_path", "Energy to grid JSON path (e.g. \"ENERGY.FeedIn\")", energy_out_path, 60);
-
+  WiFiManagerParameter custom_section1("<h3>General settings</h3>");
+  WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br>\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
+  WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
+  WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP, in milliseconds", query_period, 10);
+  WiFiManagerParameter custom_shelly_mac("mac", "<b>Shelly ID</b><br>12 char hexadecimal, defaults to MAC address of ESP", shelly_mac, 13);
+  WiFiManagerParameter custom_section2("<hr><h3>MQTT options</h3>");
+  WiFiManagerParameter custom_mqtt_port("port", "<b>MQTT Port</b>", mqtt_port, 6);
+  WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
+  WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
+  WiFiManagerParameter custom_mqtt_passwd("passwd", "<b>MQTT password</b><br>optional", mqtt_passwd, 40);
+  WiFiManagerParameter custom_section3("<hr><h3>JSON paths for MQTT and generic HTTP</h3>");
+  WiFiManagerParameter custom_power_path("power_path", "<b>Total power JSON path</b><br>e.g. \"ENERGY.Power\" or \"TRIPHASE\" for tri-phase data", power_path, 60);
+  WiFiManagerParameter custom_power_l1_path("power_l1_path", "<b>Phase 1 power JSON path</b><br>optional", power_l1_path, 60);
+  WiFiManagerParameter custom_power_l2_path("power_l2_path", "<b>Phase 2 power JSON path</b><br>Phase 2 power JSON path<br>optional", power_l2_path, 60);
+  WiFiManagerParameter custom_power_l3_path("power_l3_path", "<b>Phase 3 power JSON path</b><br>Phase 3 power JSON path<br>optional", power_l3_path, 60);
+  WiFiManagerParameter custom_energy_in_path("energy_in_path", "<b>Energy from grid JSON path</b><br>e.g. \"ENERGY.Grid\"", energy_in_path, 60);
+  WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. \"ENERGY.FeedIn\"", energy_out_path, 60);
 
   WiFiManager wifiManager;
   if(!DEBUG) {
     wifiManager.setDebugOutput(false);
   }
-
+  wifiManager.setTitle("Energy2Shelly for ESP");
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
   //add all your parameters here
@@ -741,6 +734,26 @@ void setup(void) {
     request->send(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
   });
 
+  server.on("/rpc/EM.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EMGetStatus();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  server.on("/rpc/EMData.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EMDataGetStatus();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  server.on("/rpc/EM.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EMGetConfig();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  server.on("/rpc/Shelly.GetDeviceInfo", HTTP_GET, [](AsyncWebServerRequest *request) {
+    GetDeviceInfo();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
   server.on("/rpc", HTTP_POST, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
     request->send(200, "application/json", serJsonResponse);
@@ -821,13 +834,17 @@ void setup(void) {
   DEBUG_SERIAL.println("mDNS responder started");
 }
 
-void loop(void) {
+void loop() {
   #ifndef ESP32
     MDNS.update();
   #endif
   parseUdpRPC();
   if(shouldResetConfig) {
-    WiFi.disconnect(true);
+    #ifdef ESP32
+      WiFi.disconnect(true, true);
+    #else
+      WiFi.disconnect(true);
+    #endif
     delay(1000);
     ESP.restart();  
   }
