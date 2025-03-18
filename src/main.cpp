@@ -834,13 +834,17 @@ void setup(void) {
   DEBUG_SERIAL.println("mDNS responder started");
 }
 
-void loop(void) {
+void loop() {
   #ifndef ESP32
     MDNS.update();
   #endif
   parseUdpRPC();
   if(shouldResetConfig) {
-    WiFi.disconnect(true);
+    #ifdef ESP32
+      WiFi.disconnect(true, true);
+    #else
+      WiFi.disconnect(true);
+    #endif
     delay(1000);
     ESP.restart();  
   }
