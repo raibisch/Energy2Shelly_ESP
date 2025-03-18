@@ -447,77 +447,71 @@ void parseSMA() {
                     case 2:
                       // 2.4.0 Total feed-in power in dW - unused
                       break;
-                    case 14:
-                     // Not sure why this doesn't work here...
-                     for(int i=0;i<=2;i++) {
-                       PhasePower[i].frequency = data * 0.001;
-                     }
-                     break;
                     case 21:
-                      PhasePower[0].power = data * 0.1;
-                      PhasePower[0].frequency = 50; // workaround
+                      PhasePower[0].power = round2(data * 0.1);
+                      PhasePower[0].frequency = 50;
                       break;
                     case 22:
-                      PhasePower[0].power -= data * 0.1;
+                      PhasePower[0].power -= round2(data * 0.1);
                       break;
                     case 29:
-                      PhasePower[0].apparentPower = data * 0.1;
+                      PhasePower[0].apparentPower = round2(data * 0.1);
                       break;
                     case 30:
-                      PhasePower[0].apparentPower -= data * 0.1;
+                      PhasePower[0].apparentPower -= round2(data * 0.1);
                       break;
                     case 31:
-                      PhasePower[0].current = data * 0.001;
+                      PhasePower[0].current = round2(data * 0.001);
                       break;
                     case 32:
-                      PhasePower[0].voltage = data * 0.001;
+                      PhasePower[0].voltage = round2(data * 0.001);
                       break;
                     case 33:
-                      PhasePower[0].powerFactor = data * 0.001;
+                      PhasePower[0].powerFactor = round2(data * 0.001);
                       break;
                     case 41:
-                      PhasePower[1].power = data * 0.1;
-                      PhasePower[1].frequency = 50; // workaround
+                      PhasePower[1].power = round2(data * 0.1);
+                      PhasePower[1].frequency = 50;
                       break;
                     case 42:
-                      PhasePower[1].power -= data * 0.1;
+                      PhasePower[1].power -= round2(data * 0.1);
                       break;
                     case 49:
-                      PhasePower[1].apparentPower = data * 0.1;
+                      PhasePower[1].apparentPower = round2(data * 0.1);
                       break;
                     case 50:
-                      PhasePower[1].apparentPower -= data * 0.1;
+                      PhasePower[1].apparentPower -= round2(data * 0.1);
                       break;
                     case 51:
-                      PhasePower[1].current = data * 0.001;
+                      PhasePower[1].current = round2(data * 0.001);
                       break;
                     case 52:
-                      PhasePower[1].voltage = data * 0.001;
+                      PhasePower[1].voltage = round2(data * 0.001);
                       break;
                     case 53:
-                      PhasePower[1].powerFactor = data * 0.001;
+                      PhasePower[1].powerFactor = round2(data * 0.001);
                       break;
                     case 61:
-                      PhasePower[2].power = data * 0.1;
-                      PhasePower[2].frequency = 50; // workaround
+                      PhasePower[2].power = round2(data * 0.1);
+                      PhasePower[2].frequency = 50;
                       break;
                     case 62:
-                      PhasePower[2].power -= data * 0.1;
+                      PhasePower[2].power -= round2(data * 0.1);
                       break;
                     case 69:
-                      PhasePower[2].apparentPower = data * 0.1;
+                      PhasePower[2].apparentPower = round2(data * 0.1);
                       break;
                     case 70:
-                      PhasePower[2].apparentPower -= data * 0.1;
+                      PhasePower[2].apparentPower -= round2(data * 0.1);
                       break;
                     case 71:
-                      PhasePower[2].current = data * 0.001;
+                      PhasePower[2].current = round2(data * 0.001);
                       break;
                     case 72:
-                      PhasePower[2].voltage = data * 0.001;
+                      PhasePower[2].voltage = round2(data * 0.001);
                       break;
                     case 73:
-                      PhasePower[2].powerFactor = data * 0.001;
+                      PhasePower[2].powerFactor = round2(data * 0.001);
                       break;
                     default:
                       break;
@@ -739,6 +733,26 @@ void setup(void) {
   server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
     shouldResetConfig = true;
     request->send(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
+  });
+
+  server.on("/rpc/EM.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EMGetStatus();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  server.on("/rpc/EMData.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EMDataGetStatus();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  server.on("/rpc/EM.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EMGetConfig();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  server.on("/rpc/Shelly.GetDeviceInfo", HTTP_GET, [](AsyncWebServerRequest *request) {
+    GetDeviceInfo();
+    request->send(200, "application/json", serJsonResponse);
   });
 
   server.on("/rpc", HTTP_POST, [](AsyncWebServerRequest *request) {
