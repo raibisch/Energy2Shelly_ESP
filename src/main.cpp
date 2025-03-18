@@ -117,7 +117,7 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
   return variant[path];
 }
 
-void setPowerData(double totalPower) {    
+void setPowerData(double totalPower) {
   PhasePower[0].power = round2(totalPower * 0.3333);
   PhasePower[1].power = round2(totalPower * 0.3333);
   PhasePower[2].power = round2(totalPower * 0.3333);
@@ -594,30 +594,29 @@ void WifiManagerSetup() {
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
   
-  WiFiManagerParameter custom_section1("<h4>General settings</h4>");
-  WiFiManagerParameter custom_input_type("type", "\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM Multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
-  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
-  WiFiManagerParameter custom_query_period("query_period", "query period for generic HTTP in milliseconds", query_period, 10);
-  WiFiManagerParameter custom_shelly_mac("mac", "Shelly ID (12 char hexadecimal)", shelly_mac, 13);
-  WiFiManagerParameter custom_section2("<h4>MQTT options</h4>");
-  WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
-  WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 60);
-  WiFiManagerParameter custom_mqtt_user("user", "MQTT user (optional)", mqtt_user, 40);
-  WiFiManagerParameter custom_mqtt_passwd("passwd", "MQTT password (optional)", mqtt_passwd, 40);
-  WiFiManagerParameter custom_section3("<h4>JSON Path options for MQTT and generic HTTP</h4>");
-  WiFiManagerParameter custom_power_path("power_path", "Total power JSON path (e.g. \"ENERGY.Power\") or \"TRIPHASE\" for tri-phase data", power_path, 60);
-  WiFiManagerParameter custom_power_l1_path("power_l1_path", "Phase 1 power JSON path (optional)", power_l1_path, 60);
-  WiFiManagerParameter custom_power_l2_path("power_l2_path", "Phase 2 power JSON path (optional)", power_l2_path, 60);
-  WiFiManagerParameter custom_power_l3_path("power_l3_path", "Phase 3 power JSON path (optional)", power_l3_path, 60);
-  WiFiManagerParameter custom_energy_in_path("energy_in_path", "Energy from grid JSON path (e.g. \"ENERGY.Grid\")", energy_in_path, 60);
-  WiFiManagerParameter custom_energy_out_path("energy_out_path", "Energy to grid JSON path (e.g. \"ENERGY.FeedIn\")", energy_out_path, 60);
-
+  WiFiManagerParameter custom_section1("<h3>General settings</h3>");
+  WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br>\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
+  WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
+  WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP, in milliseconds", query_period, 10);
+  WiFiManagerParameter custom_shelly_mac("mac", "<b>Shelly ID</b><br>12 char hexadecimal, defaults to MAC address of ESP", shelly_mac, 13);
+  WiFiManagerParameter custom_section2("<hr><h3>MQTT options</h3>");
+  WiFiManagerParameter custom_mqtt_port("port", "<b>MQTT Port</b>", mqtt_port, 6);
+  WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
+  WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
+  WiFiManagerParameter custom_mqtt_passwd("passwd", "<b>MQTT password</b><br>optional", mqtt_passwd, 40);
+  WiFiManagerParameter custom_section3("<hr><h3>JSON paths for MQTT and generic HTTP</h3>");
+  WiFiManagerParameter custom_power_path("power_path", "<b>Total power JSON path</b><br>e.g. \"ENERGY.Power\" or \"TRIPHASE\" for tri-phase data", power_path, 60);
+  WiFiManagerParameter custom_power_l1_path("power_l1_path", "<b>Phase 1 power JSON path</b><br>optional", power_l1_path, 60);
+  WiFiManagerParameter custom_power_l2_path("power_l2_path", "<b>Phase 2 power JSON path</b><br>Phase 2 power JSON path<br>optional", power_l2_path, 60);
+  WiFiManagerParameter custom_power_l3_path("power_l3_path", "<b>Phase 3 power JSON path</b><br>Phase 3 power JSON path<br>optional", power_l3_path, 60);
+  WiFiManagerParameter custom_energy_in_path("energy_in_path", "<b>Energy from grid JSON path</b><br>e.g. \"ENERGY.Grid\"", energy_in_path, 60);
+  WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. \"ENERGY.FeedIn\"", energy_out_path, 60);
 
   WiFiManager wifiManager;
   if(!DEBUG) {
     wifiManager.setDebugOutput(false);
   }
-
+  wifiManager.setTitle("Energy2Shelly for ESP");
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
   //add all your parameters here
