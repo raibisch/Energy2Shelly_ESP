@@ -187,81 +187,82 @@ void setJsonPathPower(JsonDocument json) {
   }
 }
 
-void GetDeviceInfo() {
+void rpcWSWrapper() {
   JsonDocument jsonResponse;
+  JsonDocument doc;
+  deserializeJson(doc,serJsonResponse);
   jsonResponse["id"] = rpcId;
   jsonResponse["src"] = shelly_name;
-  jsonResponse["result"]["name"] = shelly_name;
-  jsonResponse["result"]["id"] = shelly_name;
-  jsonResponse["result"]["mac"] = shelly_mac;
-  jsonResponse["result"]["slot"] = 1;
-  jsonResponse["result"]["model"] = "SPEM-003CEBEU";
-  jsonResponse["result"]["gen"] = 2;
-  jsonResponse["result"]["fw_id"] = "20241011-114455/1.4.4-g6d2a586";
-  jsonResponse["result"]["ver"] = "1.4.4";
-  jsonResponse["result"]["app"] = "Pro3EM";
-  jsonResponse["result"]["auth_en"] = false;
-  jsonResponse["result"]["profile"] = "triphase";
+  if (strcmp(rpcUser,"EMPTY") != 0) {
+    jsonResponse["dst"] = rpcUser;
+  }
+  jsonResponse["result"] = doc;
+  serializeJson(jsonResponse,serJsonResponse);
+}
+
+void GetDeviceInfo() {
+  JsonDocument jsonResponse;
+  jsonResponse["name"] = shelly_name;
+  jsonResponse["id"] = shelly_name;
+  jsonResponse["mac"] = shelly_mac;
+  jsonResponse["slot"] = 1;
+  jsonResponse["model"] = "SPEM-003CEBEU";
+  jsonResponse["gen"] = 2;
+  jsonResponse["fw_id"] = "20241011-114455/1.4.4-g6d2a586";
+  jsonResponse["ver"] = "1.4.4";
+  jsonResponse["app"] = "Pro3EM";
+  jsonResponse["auth_en"] = false;
+  jsonResponse["profile"] = "triphase";
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
 }
 
 void EMGetStatus(){
   JsonDocument jsonResponse;
-  jsonResponse["id"] = rpcId;
-  jsonResponse["src"] = shelly_name;
-  if (strcmp(rpcUser,"UDP") != 0) {
-    jsonResponse["dst"] = rpcUser;
-  }
-  jsonResponse["result"]["id"] = 0;
-  jsonResponse["result"]["a_current"] = PhasePower[0].current;
-  jsonResponse["result"]["a_voltage"] = PhasePower[0].voltage;
-  jsonResponse["result"]["a_act_power"] = PhasePower[0].power;
-  jsonResponse["result"]["a_aprt_power"] = PhasePower[0].apparentPower;
-  jsonResponse["result"]["a_pf"] = PhasePower[0].powerFactor;
-  jsonResponse["result"]["a_freq"] = PhasePower[0].frequency;
-  jsonResponse["result"]["b_current"] = PhasePower[1].current;
-  jsonResponse["result"]["b_voltage"] = PhasePower[1].voltage;
-  jsonResponse["result"]["b_act_power"] = PhasePower[1].power;
-  jsonResponse["result"]["b_aprt_power"] = PhasePower[1].apparentPower;
-  jsonResponse["result"]["b_pf"] = PhasePower[1].powerFactor;
-  jsonResponse["result"]["b_freq"] = PhasePower[1].frequency;
-  jsonResponse["result"]["c_current"] = PhasePower[2].current;
-  jsonResponse["result"]["c_voltage"] = PhasePower[2].voltage;
-  jsonResponse["result"]["c_act_power"] = PhasePower[2].power;
-  jsonResponse["result"]["c_aprt_power"] = PhasePower[2].apparentPower;
-  jsonResponse["result"]["c_pf"] = PhasePower[2].powerFactor;
-  jsonResponse["result"]["c_freq"] = PhasePower[2].frequency;
-  jsonResponse["result"]["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / 230);
-  jsonResponse["result"]["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
-  jsonResponse["result"]["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
+  jsonResponse["id"] = 0;
+  jsonResponse["a_current"] = PhasePower[0].current;
+  jsonResponse["a_voltage"] = PhasePower[0].voltage;
+  jsonResponse["a_act_power"] = PhasePower[0].power;
+  jsonResponse["a_aprt_power"] = PhasePower[0].apparentPower;
+  jsonResponse["a_pf"] = PhasePower[0].powerFactor;
+  jsonResponse["a_freq"] = PhasePower[0].frequency;
+  jsonResponse["b_current"] = PhasePower[1].current;
+  jsonResponse["b_voltage"] = PhasePower[1].voltage;
+  jsonResponse["b_act_power"] = PhasePower[1].power;
+  jsonResponse["b_aprt_power"] = PhasePower[1].apparentPower;
+  jsonResponse["b_pf"] = PhasePower[1].powerFactor;
+  jsonResponse["b_freq"] = PhasePower[1].frequency;
+  jsonResponse["c_current"] = PhasePower[2].current;
+  jsonResponse["c_voltage"] = PhasePower[2].voltage;
+  jsonResponse["c_act_power"] = PhasePower[2].power;
+  jsonResponse["c_aprt_power"] = PhasePower[2].apparentPower;
+  jsonResponse["c_pf"] = PhasePower[2].powerFactor;
+  jsonResponse["c_freq"] = PhasePower[2].frequency;
+  jsonResponse["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / 230);
+  jsonResponse["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
+  jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
 }
 
 void EMDataGetStatus() {
   JsonDocument jsonResponse;
-  jsonResponse["id"] = rpcId;
-  jsonResponse["src"] = shelly_name;
-  if (strcmp(rpcUser,"UDP") != 0) {
-    jsonResponse["dst"] = rpcUser;
-  }
-  jsonResponse["result"]["id"] = 0;
-  jsonResponse["result"]["a_total_act_energy"] = PhaseEnergy[0].consumption;
-  jsonResponse["result"]["a_total_act_ret_energy"] = PhaseEnergy[0].gridfeedin;
-  jsonResponse["result"]["b_total_act_energy"] = PhaseEnergy[1].consumption;
-  jsonResponse["result"]["b_total_act_ret_energy"] = PhaseEnergy[1].gridfeedin;
-  jsonResponse["result"]["c_total_act_energy"] = PhaseEnergy[2].consumption;
-  jsonResponse["result"]["c_total_act_ret_energy"] = PhaseEnergy[2].gridfeedin;
-  jsonResponse["result"]["total_act"] = PhaseEnergy[0].consumption + PhaseEnergy[1].consumption + PhaseEnergy[2].consumption;
-  jsonResponse["result"]["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
+  jsonResponse["id"] = 0;
+  jsonResponse["a_total_act_energy"] = PhaseEnergy[0].consumption;
+  jsonResponse["a_total_act_ret_energy"] = PhaseEnergy[0].gridfeedin;
+  jsonResponse["b_total_act_energy"] = PhaseEnergy[1].consumption;
+  jsonResponse["b_total_act_ret_energy"] = PhaseEnergy[1].gridfeedin;
+  jsonResponse["c_total_act_energy"] = PhaseEnergy[2].consumption;
+  jsonResponse["c_total_act_ret_energy"] = PhaseEnergy[2].gridfeedin;
+  jsonResponse["total_act"] = PhaseEnergy[0].consumption + PhaseEnergy[1].consumption + PhaseEnergy[2].consumption;
+  jsonResponse["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
 }
 
 void EMGetConfig() {
   JsonDocument jsonResponse;
-  jsonResponse["id"] = rpcId;
+  jsonResponse["id"] = 0;
   jsonResponse["name"] = nullptr;
   jsonResponse["blink_mode_selector"] = "active_energy";
   jsonResponse["phase_selector"] = "a";
@@ -288,18 +289,23 @@ void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsE
             deserializeJson(json, data);
             rpcId = json["id"];
             if (json["method"] == "Shelly.GetDeviceInfo") {
+              strcpy(rpcUser, "EMPTY");
               GetDeviceInfo();
+              rpcWSWrapper();
               webSocket.textAll(serJsonResponse);
             } else if(json["method"] == "EM.GetStatus") {
               strcpy(rpcUser,json["src"]);
               EMGetStatus();
+              rpcWSWrapper();
               webSocket.textAll(serJsonResponse);
             } else if(json["method"] == "EMData.GetStatus") {
               strcpy(rpcUser,json["src"]);
               EMDataGetStatus();
+              rpcWSWrapper();
               webSocket.textAll(serJsonResponse);
             } else if(json["method"] == "EM.GetConfig") {
               EMGetConfig();
+              rpcWSWrapper();
               webSocket.textAll(serJsonResponse);
             }
             else {
@@ -346,7 +352,7 @@ void parseUdpRPC() {
     deserializeJson(json, buffer);
     if (json["method"].is<JsonVariant>()) {
       rpcId = json["id"];
-      strcpy(rpcUser, "UDP");
+      strcpy(rpcUser, "EMPTY");
       UdpRPC.beginPacket(UdpRPC.remoteIP(), UdpRPC.remotePort());
       if (json["method"] == "Shelly.GetDeviceInfo") {
         GetDeviceInfo();
@@ -756,6 +762,7 @@ void setup(void) {
 
   server.on("/rpc", HTTP_POST, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
+    rpcWSWrapper();
     request->send(200, "application/json", serJsonResponse);
   });
 
