@@ -786,6 +786,7 @@ void setup(void) {
 
   // Set up MQTT
   if(dataMQTT) {
+    mqtt_client.setBufferSize(2048);
     mqtt_client.setServer(mqtt_server, String(mqtt_port).toInt());
     mqtt_client.setCallback(mqtt_callback);
   }
