@@ -753,8 +753,8 @@ void setup(void) {
   WifiManagerSetup();
 
   #ifdef LED_PIN
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH);
   #endif
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
