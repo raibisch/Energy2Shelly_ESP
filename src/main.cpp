@@ -89,6 +89,16 @@ String serJsonResponse;
   MDNSResponder::hMDNSService hMDNSService2 = 0; // handle of the shelly service in the MDNS responder
 #endif
 
+#ifdef ESP32
+  #define LED_PIN 2
+  unsigned long ledOffTime = 0;
+#endif
+
+#ifdef ESP8266
+  #define LED_PIN 2
+  unsigned long ledOffTime = 0;
+#endif
+
 WiFiClient wifi_client;
 PubSubClient mqtt_client(wifi_client);
 static AsyncWebServer server(80);
@@ -726,9 +736,26 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println(WiFi.localIP());
 }
 
+void blinkLED(int duration) {
+  digitalWrite(LED_PIN, LOW);
+  ledOffTime = millis() + duration;
+}
+
+void handleblinkLED() {
+  if (ledOffTime > 0 && millis() > ledOffTime) {
+      digitalWrite(LED_PIN, HIGH);
+      ledOffTime = 0;
+  }
+}
+
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
+
+  #ifdef LED_PIN
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
+  #endif
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
@@ -737,6 +764,9 @@ void setup(void) {
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
+    #ifdef LED_PIN
+    blinkLED(50);
+    #endif
   });
 
   server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -747,27 +777,42 @@ void setup(void) {
   server.on("/rpc/EM.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
+    #ifdef LED_PIN
+    blinkLED(50);
+    #endif
   });
 
   server.on("/rpc/EMData.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMDataGetStatus();
     request->send(200, "application/json", serJsonResponse);
+    #ifdef LED_PIN
+    blinkLED(50);
+    #endif
   });
 
   server.on("/rpc/EM.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetConfig();
     request->send(200, "application/json", serJsonResponse);
+    #ifdef LED_PIN
+    blinkLED(50);
+    #endif
   });
 
   server.on("/rpc/Shelly.GetDeviceInfo", HTTP_GET, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
     request->send(200, "application/json", serJsonResponse);
+    #ifdef LED_PIN
+    blinkLED(50);
+    #endif
   });
 
   server.on("/rpc", HTTP_POST, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
     rpcWrapper();
     request->send(200, "application/json", serJsonResponse);
+    #ifdef LED_PIN
+    blinkLED(50);
+    #endif
   });
 
   webSocket.onEvent(webSocketEvent);
@@ -879,4 +924,7 @@ void loop() {
       startMillis = currentMillis;
     }
   }
+  #ifdef LED_PIN
+  handleblinkLED();
+  #endif
 }
