@@ -204,6 +204,22 @@ void rpcWrapper() {
   serializeJson(jsonResponse,serJsonResponse);
 }
 
+void blinkled(int duration) {
+  if(led > 0) {
+    digitalWrite(led, LOW);
+    ledOffTime = millis() + duration;
+  }
+}
+
+void handleblinkled() {
+  if(led > 0) {
+    if (ledOffTime > 0 && millis() > ledOffTime) {
+	  digitalWrite(led, HIGH);
+	  ledOffTime = 0;
+	}
+  }
+}
+
 void GetDeviceInfo() {
   JsonDocument jsonResponse;
   jsonResponse["name"] = shelly_name;
@@ -219,6 +235,7 @@ void GetDeviceInfo() {
   jsonResponse["profile"] = "triphase";
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(50);
 }
 
 void EMGetStatus(){
@@ -247,6 +264,7 @@ void EMGetStatus(){
   jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(50);
 }
 
 void EMDataGetStatus() {
@@ -262,6 +280,7 @@ void EMDataGetStatus() {
   jsonResponse["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(50);
 }
 
 void EMGetConfig() {
@@ -274,6 +293,7 @@ void EMGetConfig() {
   jsonResponse["ct_type"] = "120A";
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(50);
 }
 
 void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
@@ -736,18 +756,6 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println(WiFi.localIP());
 }
 
-void blinkled(int duration) {
-  digitalWrite(led, LOW);
-  ledOffTime = millis() + duration;
-}
-
-void handleblinkled() {
-  if (ledOffTime > 0 && millis() > ledOffTime) {
-    digitalWrite(led, HIGH);
-    ledOffTime = 0;
-  }
-}
-
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
@@ -768,9 +776,6 @@ if(String(led_gpio).toInt() > 0) {
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
-    if(led > 0) {
-      blinkled(50);
-    }
   });
 
   server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -781,42 +786,27 @@ if(String(led_gpio).toInt() > 0) {
   server.on("/rpc/EM.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
-    if(led > 0) {
-      blinkled(50);
-    }
   });
 
   server.on("/rpc/EMData.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMDataGetStatus();
     request->send(200, "application/json", serJsonResponse);
-    if(led > 0) {
-      blinkled(50);
-    }
   });
 
   server.on("/rpc/EM.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetConfig();
     request->send(200, "application/json", serJsonResponse);
-    if(led > 0) {
-      blinkled(50);
-    }
   });
 
   server.on("/rpc/Shelly.GetDeviceInfo", HTTP_GET, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
     request->send(200, "application/json", serJsonResponse);
-    if(led > 0) {
-      blinkled(50);
-    }
   });
 
   server.on("/rpc", HTTP_POST, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
     rpcWrapper();
     request->send(200, "application/json", serJsonResponse);
-    if(led > 0) {
-      blinkled(50);
-    }
   });
 
   webSocket.onEvent(webSocketEvent);
@@ -928,7 +918,5 @@ void loop() {
       startMillis = currentMillis;
     }
   }
-  if(led > 0) {
-    handleblinkled();
-  }
+  handleblinkled();
 }
