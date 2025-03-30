@@ -108,16 +108,15 @@ double round2(double value) {
 
 JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
   for (size_t n = 0; path[n]; n++) {
+    // Not a full array support, but works for Shelly 3EM emeters array!    
     if (path[n] == '[') {
       variant = variant[JsonString(path, n)][atoi(&path[n+1])];
       path += n + 4;
       n = 0;
     }
     if (path[n] == '.' ) {
-      DEBUG_SERIAL.println(path);
       variant = variant[JsonString(path, n)];
       path += n + 1;
-      DEBUG_SERIAL.println(path);
       n = 0;
     }
   }
