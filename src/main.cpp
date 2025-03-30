@@ -718,7 +718,7 @@ void WifiManagerSetup() {
     preferences.putString("input_type", input_type);
     preferences.putString("mqtt_server", mqtt_server);
     preferences.putString("query_period", query_period);
-	preferences.putString("led_gpio", led_gpio);
+    preferences.putString("led_gpio", led_gpio);
     preferences.putString("shelly_mac", shelly_mac);
     preferences.putString("mqtt_port", mqtt_port);
     preferences.putString("mqtt_topic", mqtt_topic);
