@@ -743,8 +743,8 @@ void blinkLED(int duration) {
 
 void handleblinkLED() {
   if (ledOffTime > 0 && millis() > ledOffTime) {
-      digitalWrite(LED_PIN, HIGH);
-      ledOffTime = 0;
+    digitalWrite(LED_PIN, HIGH);
+    ledOffTime = 0;
   }
 }
 
@@ -765,7 +765,7 @@ void setup(void) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
     #ifdef LED_PIN
-    blinkLED(50);
+      blinkLED(50);
     #endif
   });
 
@@ -778,7 +778,7 @@ void setup(void) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
     #ifdef LED_PIN
-    blinkLED(50);
+      blinkLED(50);
     #endif
   });
 
@@ -786,7 +786,7 @@ void setup(void) {
     EMDataGetStatus();
     request->send(200, "application/json", serJsonResponse);
     #ifdef LED_PIN
-    blinkLED(50);
+      blinkLED(50);
     #endif
   });
 
@@ -794,7 +794,7 @@ void setup(void) {
     EMGetConfig();
     request->send(200, "application/json", serJsonResponse);
     #ifdef LED_PIN
-    blinkLED(50);
+      blinkLED(50);
     #endif
   });
 
@@ -802,7 +802,7 @@ void setup(void) {
     GetDeviceInfo();
     request->send(200, "application/json", serJsonResponse);
     #ifdef LED_PIN
-    blinkLED(50);
+      blinkLED(50);
     #endif
   });
 
@@ -811,7 +811,7 @@ void setup(void) {
     rpcWrapper();
     request->send(200, "application/json", serJsonResponse);
     #ifdef LED_PIN
-    blinkLED(50);
+      blinkLED(50);
     #endif
   });
 
@@ -925,6 +925,6 @@ void loop() {
     }
   }
   #ifdef LED_PIN
-  handleblinkLED();
+    handleblinkLED();
   #endif
 }
