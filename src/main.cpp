@@ -214,9 +214,9 @@ void blinkled(int duration) {
 void handleblinkled() {
   if(led > 0) {
     if (ledOffTime > 0 && millis() > ledOffTime) {
-	  digitalWrite(led, HIGH);
-	  ledOffTime = 0;
-	}
+      digitalWrite(led, HIGH);
+      ledOffTime = 0;
+    }
   }
 }
 
@@ -764,9 +764,9 @@ if(String(led_gpio).toInt() > 0) {
   led = String(led_gpio).toInt();
 }
 
-  if(led > 0) {
-    pinMode(led, OUTPUT);
-    digitalWrite(led, HIGH);
+if(led > 0) {
+  pinMode(led, OUTPUT);
+  digitalWrite(led, HIGH);
 }
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
