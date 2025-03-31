@@ -46,6 +46,7 @@ char query_period[10] = "1000";
 
 unsigned long ledOffTime = 0;
 int led = 0;
+int ledblinkduration = 50;
 char led_gpio[2] = "";
 
 unsigned long period = 1000;
@@ -241,7 +242,7 @@ void GetDeviceInfo() {
   jsonResponse["profile"] = "triphase";
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-  blinkled(50);
+  blinkled(ledblinkduration);
 }
 
 void EMGetStatus(){
@@ -270,7 +271,7 @@ void EMGetStatus(){
   jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-  blinkled(50);
+  blinkled(ledblinkduration);
 }
 
 void EMDataGetStatus() {
@@ -286,7 +287,7 @@ void EMDataGetStatus() {
   jsonResponse["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-  blinkled(50);
+  blinkled(ledblinkduration);
 }
 
 void EMGetConfig() {
@@ -299,7 +300,7 @@ void EMGetConfig() {
   jsonResponse["ct_type"] = "120A";
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-  blinkled(50);
+  blinkled(ledblinkduration);
 }
 
 void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
