@@ -46,7 +46,7 @@ char query_period[10] = "1000";
 
 unsigned long ledOffTime = 0;
 int led = 0;
-int ledblinkduration = 50;
+const uint8_t ledblinkduration = 50;
 char led_gpio[2] = "";
 
 unsigned long period = 1000;
