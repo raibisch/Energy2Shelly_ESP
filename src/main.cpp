@@ -38,11 +38,16 @@ char power_path[60] = "";
 char power_l1_path[60] = "";
 char power_l2_path[60] = "";
 char power_l3_path[60] = "";
-char energy_in_path[60] ="";
-char energy_out_path[60] ="";
+char energy_in_path[60] = "";
+char energy_out_path[60] = "";
 char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
+
+unsigned long ledOffTime = 0;
+int led = 0;
+const uint8_t ledblinkduration = 50;
+char led_gpio[2] = "";
 
 unsigned long period = 1000;
 int rpcId = 1;
@@ -206,6 +211,22 @@ void rpcWrapper() {
   serializeJson(jsonResponse,serJsonResponse);
 }
 
+void blinkled(int duration) {
+  if(led > 0) {
+    digitalWrite(led, LOW);
+    ledOffTime = millis() + duration;
+  }
+}
+
+void handleblinkled() {
+  if(led > 0) {
+    if (ledOffTime > 0 && millis() > ledOffTime) {
+      digitalWrite(led, HIGH);
+      ledOffTime = 0;
+    }
+  }
+}
+
 void GetDeviceInfo() {
   JsonDocument jsonResponse;
   jsonResponse["name"] = shelly_name;
@@ -221,6 +242,7 @@ void GetDeviceInfo() {
   jsonResponse["profile"] = "triphase";
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(ledblinkduration);
 }
 
 void EMGetStatus(){
@@ -249,6 +271,7 @@ void EMGetStatus(){
   jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(ledblinkduration);
 }
 
 void EMDataGetStatus() {
@@ -264,6 +287,7 @@ void EMDataGetStatus() {
   jsonResponse["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(ledblinkduration);
 }
 
 void EMGetConfig() {
@@ -276,6 +300,7 @@ void EMGetConfig() {
   jsonResponse["ct_type"] = "120A";
   serializeJson(jsonResponse,serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(ledblinkduration);
 }
 
 void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
@@ -598,6 +623,7 @@ void WifiManagerSetup() {
   strcpy(input_type, preferences.getString("input_type", input_type).c_str());
   strcpy(mqtt_server, preferences.getString("mqtt_server", mqtt_server).c_str());
   strcpy(query_period, preferences.getString("query_period", query_period).c_str());
+  strcpy(led_gpio, preferences.getString("led_gpio", led_gpio).c_str());
   strcpy(shelly_mac, preferences.getString("shelly_mac", shelly_mac).c_str());
   strcpy(mqtt_port, preferences.getString("mqtt_port", mqtt_port).c_str());
   strcpy(mqtt_topic, preferences.getString("mqtt_topic", mqtt_topic).c_str());
@@ -614,6 +640,7 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br>\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
   WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
   WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP, in milliseconds", query_period, 10);
+  WiFiManagerParameter custom_led_gpio("led_gpio", "<b>GPIO</b><br>of internal LED", led_gpio, 2);
   WiFiManagerParameter custom_shelly_mac("mac", "<b>Shelly ID</b><br>12 char hexadecimal, defaults to MAC address of ESP", shelly_mac, 13);
   WiFiManagerParameter custom_section2("<hr><h3>MQTT options</h3>");
   WiFiManagerParameter custom_mqtt_port("port", "<b>MQTT Port</b>", mqtt_port, 6);
@@ -640,6 +667,7 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_input_type);
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_query_period);
+  wifiManager.addParameter(&custom_led_gpio);
   wifiManager.addParameter(&custom_shelly_mac);
   wifiManager.addParameter(&custom_section2);
   wifiManager.addParameter(&custom_mqtt_port);
@@ -667,6 +695,7 @@ void WifiManagerSetup() {
   strcpy(input_type, custom_input_type.getValue());
   strcpy(mqtt_server, custom_mqtt_server.getValue());
   strcpy(query_period, custom_query_period.getValue());
+  strcpy(led_gpio, custom_led_gpio.getValue());
   strcpy(shelly_mac, custom_shelly_mac.getValue());
   strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
@@ -683,6 +712,7 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tinput_type : " + String(input_type));
   DEBUG_SERIAL.println("\tmqtt_server : " + String(mqtt_server));
   DEBUG_SERIAL.println("\tquery_period : " + String(query_period));
+  DEBUG_SERIAL.println("\tled_gpio : " + String(led_gpio));
   DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
   DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
@@ -715,6 +745,7 @@ void WifiManagerSetup() {
     preferences.putString("input_type", input_type);
     preferences.putString("mqtt_server", mqtt_server);
     preferences.putString("query_period", query_period);
+    preferences.putString("led_gpio", led_gpio);
     preferences.putString("shelly_mac", shelly_mac);
     preferences.putString("mqtt_port", mqtt_port);
     preferences.putString("mqtt_topic", mqtt_topic);
@@ -735,6 +766,15 @@ void WifiManagerSetup() {
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
+  
+if(String(led_gpio).toInt() > 0) {
+  led = String(led_gpio).toInt();
+}
+
+if(led > 0) {
+  pinMode(led, OUTPUT);
+  digitalWrite(led, HIGH);
+}
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
@@ -886,4 +926,5 @@ void loop() {
       startMillis = currentMillis;
     }
   }
+  handleblinkled();
 }
