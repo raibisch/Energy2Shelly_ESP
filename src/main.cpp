@@ -44,10 +44,11 @@ char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
 
+// LED blink default values
 unsigned long ledOffTime = 0;
-int led = 0;
+uint8_t led = 0;
 const uint8_t ledblinkduration = 50;
-char led_gpio[2] = "";
+char led_gpio[3] = "";
 
 unsigned long period = 1000;
 int rpcId = 1;
@@ -57,13 +58,13 @@ char rpcUser[20] = "user_1";
 unsigned int multicastPort = 9522;  // local port to listen on
 IPAddress multicastIP(239, 12, 255, 254);
 
-//flag for saving/resetting WifiManager data
+// flags for saving/resetting WifiManager data
 bool shouldSaveConfig = false;
 bool shouldResetConfig = false;
 
 Preferences preferences;
 
-//flags for data sources
+// flags for data sources
 bool dataMQTT = false;
 bool dataSMA = false;
 bool dataSHRDZM = false;
