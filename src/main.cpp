@@ -27,7 +27,7 @@
 unsigned long startMillis;
 unsigned long currentMillis;
 
-//define your default values here, if there are different values in config.json, they are overwritten.
+// define your default values here, if there are different values in config.json, they are overwritten.
 char input_type[40];
 char mqtt_server[80];
 char mqtt_port[6] = "1883";
@@ -44,6 +44,7 @@ char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
 
+// LED blink default values
 unsigned long ledOffTime = 0;
 uint8_t led = 0;
 bool led_i = false;
