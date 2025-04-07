@@ -44,6 +44,10 @@ char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
 
+const uint8_t defaultVoltage = 230;
+const uint8_t defaultFrequency = 50;
+const uint8_t defaultPowerFactor = 1;
+
 // LED blink default values
 unsigned long ledOffTime = 0;
 uint8_t led = 0;
@@ -134,11 +138,11 @@ void setPowerData(double totalPower) {
   PhasePower[1].power = round2(totalPower * 0.3333);
   PhasePower[2].power = round2(totalPower * 0.3333);
   for(int i=0;i<=2;i++) {
-    PhasePower[i].voltage = 230;
+    PhasePower[i].voltage = defaultVoltage;
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
     PhasePower[i].apparentPower = PhasePower[i].power;
-    PhasePower[i].powerFactor = 1;
-    PhasePower[i].frequency = 50;
+    PhasePower[i].powerFactor = defaultPowerFactor;
+    PhasePower[i].frequency = defaultFrequency;
   }
   DEBUG_SERIAL.print("Current total power: ");
   DEBUG_SERIAL.println(totalPower);
@@ -149,11 +153,11 @@ void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
   PhasePower[1].power = round2(phase2Power);
   PhasePower[2].power = round2(phase3Power);
   for(int i=0;i<=2;i++) {
-    PhasePower[i].voltage = 230;
+    PhasePower[i].voltage = defaultVoltage;
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
     PhasePower[i].apparentPower = PhasePower[i].power;
-    PhasePower[i].powerFactor = 1;
-    PhasePower[i].frequency = 50;
+    PhasePower[i].powerFactor = defaultPowerFactor;
+    PhasePower[i].frequency = defaultFrequency;
   }
   DEBUG_SERIAL.print("Current power L1: ");
   DEBUG_SERIAL.print(phase1Power);
@@ -267,7 +271,7 @@ void EMGetStatus(){
   jsonResponse["c_aprt_power"] = PhasePower[2].apparentPower;
   jsonResponse["c_pf"] = PhasePower[2].powerFactor;
   jsonResponse["c_freq"] = PhasePower[2].frequency;
-  jsonResponse["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / 230);
+  jsonResponse["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / defaultVoltage);
   jsonResponse["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
   jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse,serJsonResponse);
@@ -491,7 +495,7 @@ void parseSMA() {
                       break;
                     case 21:
                       PhasePower[0].power = round2(data * 0.1);
-                      PhasePower[0].frequency = 50;
+                      PhasePower[0].frequency = defaultFrequency;
                       break;
                     case 22:
                       PhasePower[0].power -= round2(data * 0.1);
@@ -513,7 +517,7 @@ void parseSMA() {
                       break;
                     case 41:
                       PhasePower[1].power = round2(data * 0.1);
-                      PhasePower[1].frequency = 50;
+                      PhasePower[1].frequency = defaultFrequency;
                       break;
                     case 42:
                       PhasePower[1].power -= round2(data * 0.1);
@@ -535,7 +539,7 @@ void parseSMA() {
                       break;
                     case 61:
                       PhasePower[2].power = round2(data * 0.1);
-                      PhasePower[2].frequency = 50;
+                      PhasePower[2].frequency = defaultFrequency;
                       break;
                     case 62:
                       PhasePower[2].power -= round2(data * 0.1);
