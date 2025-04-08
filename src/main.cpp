@@ -35,6 +35,7 @@ char mqtt_topic[60] = "tele/meter/SENSOR";
 char mqtt_user[40] = "";
 char mqtt_passwd[40] = "";
 char power_path[60] = "";
+char pwr_export_path[60] = "";
 char power_l1_path[60] = "";
 char power_l2_path[60] = "";
 char power_l3_path[60] = "";
@@ -118,7 +119,7 @@ double round2(double value) {
 
 JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
   for (size_t n = 0; path[n]; n++) {
-    // Not a full array support, but works for Shelly 3EM emeters array!    
+    // Not a full array support, but works for Shelly 3EM emeters array!
     if (path[n] == '[') {
       variant = variant[JsonString(path, n)][atoi(&path[n+1])];
       path += n + 4;
@@ -167,7 +168,7 @@ void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
   DEBUG_SERIAL.println(phase3Power);
 }
 
-void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {    
+void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
   for(int i=0;i<=2;i++) {
     PhaseEnergy[i].consumption = round2(totalEnergyGridSupply * 0.3333);
     PhaseEnergy[i].gridfeedin = round2(totalEnergyGridFeedIn * 0.3333);
@@ -192,9 +193,20 @@ void setJsonPathPower(JsonDocument json) {
     double power3 = resolveJsonPath(json, power_l3_path);
     setPowerData(power1, power2, power3);
   } else {
-    DEBUG_SERIAL.println("resolving monophase");
-    double power = resolveJsonPath(json, power_path);
-    setPowerData(power);
+      // Check if BOTH paths (Import = power_path, Export = pwr_export_path) are defined
+      if ((strcmp(power_path, "") != 0) && (strcmp(pwr_export_path, "") != 0)) {
+          DEBUG_SERIAL.println("Resolving net power (import - export)");
+          double importPower = resolveJsonPath(json, power_path).as<double>();
+          double exportPower = resolveJsonPath(json, pwr_export_path).as<double>();
+          double netPower = importPower - exportPower;
+          setPowerData(netPower);
+      }
+      // (FALLBACK): Only the normal power_path (import path) is defined (old logic)
+      else if (strcmp(power_path, "") != 0) {
+          DEBUG_SERIAL.println("Resolving monophase (single path only)");
+          double power = resolveJsonPath(json, power_path).as<double>();
+          setPowerData(power);
+      }
   }
   if ((strcmp(energy_in_path, "") != 0) && (strcmp(energy_out_path, "") != 0)) {
     double energyIn = resolveJsonPath(json, energy_in_path);
@@ -635,12 +647,13 @@ void WifiManagerSetup() {
   strcpy(mqtt_user, preferences.getString("mqtt_user", mqtt_user).c_str());
   strcpy(mqtt_passwd, preferences.getString("mqtt_passwd", mqtt_passwd).c_str());
   strcpy(power_path, preferences.getString("power_path", power_path).c_str());
+  strcpy(pwr_export_path, preferences.getString("pwr_export_path", pwr_export_path).c_str());
   strcpy(power_l1_path, preferences.getString("power_l1_path", power_l1_path).c_str());
   strcpy(power_l2_path, preferences.getString("power_l2_path", power_l2_path).c_str());
   strcpy(power_l3_path, preferences.getString("power_l3_path", power_l3_path).c_str());
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
-  
+
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
   WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br>\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
   WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
@@ -654,6 +667,7 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_mqtt_passwd("passwd", "<b>MQTT password</b><br>optional", mqtt_passwd, 40);
   WiFiManagerParameter custom_section3("<hr><h3>JSON paths for MQTT and generic HTTP</h3>");
   WiFiManagerParameter custom_power_path("power_path", "<b>Total power JSON path</b><br>e.g. \"ENERGY.Power\" or \"TRIPHASE\" for tri-phase data", power_path, 60);
+  WiFiManagerParameter custom_pwr_export_path("pwr_export_path", "<b>Export power JSON path</b><br>Optional, for net calc (e.g. \"i-e\")", pwr_export_path, 60);
   WiFiManagerParameter custom_power_l1_path("power_l1_path", "<b>Phase 1 power JSON path</b><br>optional", power_l1_path, 60);
   WiFiManagerParameter custom_power_l2_path("power_l2_path", "<b>Phase 2 power JSON path</b><br>Phase 2 power JSON path<br>optional", power_l2_path, 60);
   WiFiManagerParameter custom_power_l3_path("power_l3_path", "<b>Phase 3 power JSON path</b><br>Phase 3 power JSON path<br>optional", power_l3_path, 60);
@@ -681,6 +695,7 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_mqtt_passwd);
   wifiManager.addParameter(&custom_section3);
   wifiManager.addParameter(&custom_power_path);
+  wifiManager.addParameter(&custom_pwr_export_path);
   wifiManager.addParameter(&custom_power_l1_path);
   wifiManager.addParameter(&custom_power_l2_path);
   wifiManager.addParameter(&custom_power_l3_path);
@@ -707,6 +722,7 @@ void WifiManagerSetup() {
   strcpy(mqtt_user, custom_mqtt_user.getValue());
   strcpy(mqtt_passwd, custom_mqtt_passwd.getValue());
   strcpy(power_path, custom_power_path.getValue());
+  strcpy(pwr_export_path, custom_pwr_export_path.getValue());
   strcpy(power_l1_path, custom_power_l1_path.getValue());
   strcpy(power_l2_path, custom_power_l2_path.getValue());
   strcpy(power_l3_path, custom_power_l3_path.getValue());
@@ -724,6 +740,7 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tmqtt_user : " + String(mqtt_user));
   DEBUG_SERIAL.println("\tmqtt_passwd : " + String(mqtt_passwd));
   DEBUG_SERIAL.println("\tpower_path : " + String(power_path));
+  DEBUG_SERIAL.println("\tpwr_export_path : " + String(pwr_export_path));
   DEBUG_SERIAL.println("\tpower_l1_path : " + String(power_l1_path));
   DEBUG_SERIAL.println("\tpower_l2_path : " + String(power_l2_path));
   DEBUG_SERIAL.println("\tpower_l3_path : " + String(power_l3_path));
@@ -757,6 +774,7 @@ void WifiManagerSetup() {
     preferences.putString("mqtt_user", mqtt_user);
     preferences.putString("mqtt_passwd", mqtt_passwd);
     preferences.putString("power_path", power_path);
+    preferences.putString("pwr_export_path", pwr_export_path);
     preferences.putString("power_l1_path", power_l1_path);
     preferences.putString("power_l2_path", power_l2_path);
     preferences.putString("power_l3_path", power_l3_path);
