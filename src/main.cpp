@@ -891,7 +891,7 @@ if(led > 0) {
       MDNS.addServiceTxt(hMDNSService2, "fw_id", shelly_fw_id);
       MDNS.addServiceTxt(hMDNSService2, "arch", "esp8266");
       MDNS.addServiceTxt(hMDNSService2, "id", shelly_name);
-      MDNS.addServiceTxt(hMDNSService, "gen", shelly_gen);
+      MDNS.addServiceTxt(hMDNSService2, "gen", shelly_gen);
     }
   #endif
   DEBUG_SERIAL.println("mDNS responder started");
