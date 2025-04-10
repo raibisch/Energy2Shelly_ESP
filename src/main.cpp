@@ -41,6 +41,8 @@ char power_l2_path[60] = "";
 char power_l3_path[60] = "";
 char energy_in_path[60] = "";
 char energy_out_path[60] = "";
+char shelly_gen[2] = "2";
+char shelly_fw_id[32] = "20241011-114455/1.4.4-g6d2a586";
 char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
@@ -135,10 +137,8 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
 }
 
 void setPowerData(double totalPower) {
-  PhasePower[0].power = round2(totalPower * 0.3333);
-  PhasePower[1].power = round2(totalPower * 0.3333);
-  PhasePower[2].power = round2(totalPower * 0.3333);
   for(int i=0;i<=2;i++) {
+    PhasePower[i].power = round2(totalPower * 0.3333);
     PhasePower[i].voltage = defaultVoltage;
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
     PhasePower[i].apparentPower = PhasePower[i].power;
@@ -251,8 +251,8 @@ void GetDeviceInfo() {
   jsonResponse["mac"] = shelly_mac;
   jsonResponse["slot"] = 1;
   jsonResponse["model"] = "SPEM-003CEBEU";
-  jsonResponse["gen"] = 2;
-  jsonResponse["fw_id"] = "20241011-114455/1.4.4-g6d2a586";
+  jsonResponse["gen"] = shelly_gen;
+  jsonResponse["fw_id"] = shelly_fw_id;
   jsonResponse["ver"] = "1.4.4";
   jsonResponse["app"] = "Pro3EM";
   jsonResponse["auth_en"] = false;
@@ -885,10 +885,10 @@ if(led > 0) {
     MDNS.addService("http", "tcp", 80);
     MDNS.addService("shelly", "tcp", 80);
     mdns_txt_item_t serviceTxtData[4] = {
-      {"fw_id","20241011-114455/1.4.4-g6d2a586"},
+      {"fw_id",shelly_fw_id},
       {"arch","esp8266"},
       {"id",shelly_name},
-      {"gen","2"}
+      {"gen",shelly_gen}
     };
     mdns_service_instance_name_set("_http", "_tcp", shelly_name);
     mdns_service_txt_set("_http", "_tcp", serviceTxtData, 4);
@@ -899,17 +899,17 @@ if(led > 0) {
     hMDNSService2 = MDNS.addService(0, "shelly", "tcp", 80);
     if (hMDNSService) {
       MDNS.setServiceName(hMDNSService, shelly_name);
-      MDNS.addServiceTxt(hMDNSService, "fw_id", "20241011-114455/1.4.4-g6d2a586");
+      MDNS.addServiceTxt(hMDNSService, "fw_id", shelly_fw_id);
       MDNS.addServiceTxt(hMDNSService, "arch", "esp8266");
       MDNS.addServiceTxt(hMDNSService, "id", shelly_name);
-      MDNS.addServiceTxt(hMDNSService, "gen", "2");
+      MDNS.addServiceTxt(hMDNSService, "gen", shelly_gen);
     }
     if (hMDNSService2) {
       MDNS.setServiceName(hMDNSService2, shelly_name);
-      MDNS.addServiceTxt(hMDNSService2, "fw_id", "20241011-114455/1.4.4-g6d2a586");
+      MDNS.addServiceTxt(hMDNSService2, "fw_id", shelly_fw_id);
       MDNS.addServiceTxt(hMDNSService2, "arch", "esp8266");
       MDNS.addServiceTxt(hMDNSService2, "id", shelly_name);
-      MDNS.addServiceTxt(hMDNSService2, "gen", "2");
+      MDNS.addServiceTxt(hMDNSService2, "gen", shelly_gen);
     }
   #endif
   DEBUG_SERIAL.println("mDNS responder started");
