@@ -51,7 +51,6 @@ char query_period[10] = "1000";
 
 IPAddress modbus_ip;
 ModbusIP modbus1;
-int modbus_port = 502; // for KSEM Modbus TCIP Slave Port=502
 int modbus_device = 71; // for KSEM Device = 71
 int16_t modbus_result[256];
 
@@ -654,7 +653,7 @@ void parseSUNSPEC() {
   
   modbus_ip.fromString(mqtt_server);
   if (!modbus1.isConnected(modbus_ip)) {
-    modbus1.connect(modbus_ip, modbus_port);
+    modbus1.connect(modbus_ip, String(mqtt_port).toInt());
   } else {
     uint16_t transaction = modbus1.readHreg(modbus_ip, SUNSPEC_BASE, (uint16_t*) &modbus_result[0], 64, nullptr, modbus_device);
     delay(10);
@@ -701,7 +700,7 @@ void parseSUNSPEC() {
         p|=((uint32_t)p_u8[3])<<8;
         p|=((uint32_t)p_u8[0])<<16;
         p|=((uint32_t)p_u8[1])<<24;
-          PhaseEnergy[n].consumption=p/1000.0*scale_real_energy;        
+          PhaseEnergy[n].consumption=p/1000.0*scale_real_energy;
           p=0;
           p_u8=(uint8_t *)&modbus_result[SUNSPEC_REAL_ENERGY_EXPORTED-SUNSPEC_BASE+2*n];
           p|=((uint32_t)p_u8[2])<<0;
@@ -755,25 +754,25 @@ void WifiManagerSetup() {
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
 
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
-  WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br>\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
-  WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
-  WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP, in milliseconds", query_period, 10);
+  WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for ModbusTCP SUNSPEC data", input_type, 40);
+  WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP, query url for generic HTTP or ModbusTCP server IP for SUNSPEC", mqtt_server, 80);
+  WiFiManagerParameter custom_mqtt_port("port", "<b>Port</b><br> for MQTT or ModbusTCP (SUNSPEC)", mqtt_port, 6);
+  WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP and SUNSPEC, in milliseconds", query_period, 10);
   WiFiManagerParameter custom_led_gpio("led_gpio", "<b>GPIO</b><br>of internal LED", led_gpio, 3);
-  WiFiManagerParameter custom_led_gpio_i("led_gpio_i", "<b>GPIO is inverted</b><br>\"true\" or \"false\"", led_gpio_i, 6);
+  WiFiManagerParameter custom_led_gpio_i("led_gpio_i", "<b>GPIO is inverted</b><br><code>true</code> or <code>false</code>", led_gpio_i, 6);
   WiFiManagerParameter custom_shelly_mac("mac", "<b>Shelly ID</b><br>12 char hexadecimal, defaults to MAC address of ESP", shelly_mac, 13);
   WiFiManagerParameter custom_section2("<hr><h3>MQTT options</h3>");
-  WiFiManagerParameter custom_mqtt_port("port", "<b>MQTT Port</b>", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
   WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
   WiFiManagerParameter custom_mqtt_passwd("passwd", "<b>MQTT password</b><br>optional", mqtt_passwd, 40);
   WiFiManagerParameter custom_section3("<hr><h3>JSON paths for MQTT and generic HTTP</h3>");
-  WiFiManagerParameter custom_power_path("power_path", "<b>Total power JSON path</b><br>e.g. \"ENERGY.Power\" or \"TRIPHASE\" for tri-phase data", power_path, 60);
-  WiFiManagerParameter custom_pwr_export_path("pwr_export_path", "<b>Export power JSON path</b><br>Optional, for net calc (e.g. \"i-e\")", pwr_export_path, 60);
+  WiFiManagerParameter custom_power_path("power_path", "<b>Total power JSON path</b><br>e.g. <code>ENERGY.Power</code> or <code>TRIPHASE</code> for tri-phase data", power_path, 60);
+  WiFiManagerParameter custom_pwr_export_path("pwr_export_path", "<b>Export power JSON path</b><br>Optional, for net calc (e.g. \"i-e\"", pwr_export_path, 60);
   WiFiManagerParameter custom_power_l1_path("power_l1_path", "<b>Phase 1 power JSON path</b><br>optional", power_l1_path, 60);
   WiFiManagerParameter custom_power_l2_path("power_l2_path", "<b>Phase 2 power JSON path</b><br>Phase 2 power JSON path<br>optional", power_l2_path, 60);
   WiFiManagerParameter custom_power_l3_path("power_l3_path", "<b>Phase 3 power JSON path</b><br>Phase 3 power JSON path<br>optional", power_l3_path, 60);
-  WiFiManagerParameter custom_energy_in_path("energy_in_path", "<b>Energy from grid JSON path</b><br>e.g. \"ENERGY.Grid\"", energy_in_path, 60);
-  WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. \"ENERGY.FeedIn\"", energy_out_path, 60);
+  WiFiManagerParameter custom_energy_in_path("energy_in_path", "<b>Energy from grid JSON path</b><br>e.g. <code>ENERGY.Grid</code>", energy_in_path, 60);
+  WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. <code>ENERGY.FeedIn</code>", energy_out_path, 60);
 
   WiFiManager wifiManager;
   if (!DEBUG) {
@@ -816,11 +815,11 @@ void WifiManagerSetup() {
   //read updated parameters
   strcpy(input_type, custom_input_type.getValue());
   strcpy(mqtt_server, custom_mqtt_server.getValue());
+  strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(query_period, custom_query_period.getValue());
   strcpy(led_gpio, custom_led_gpio.getValue());
   strcpy(led_gpio_i, custom_led_gpio_i.getValue());
   strcpy(shelly_mac, custom_shelly_mac.getValue());
-  strcpy(mqtt_port, custom_mqtt_port.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
   strcpy(mqtt_user, custom_mqtt_user.getValue());
   strcpy(mqtt_passwd, custom_mqtt_passwd.getValue());
@@ -835,11 +834,11 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("The values in the preferences are: ");
   DEBUG_SERIAL.println("\tinput_type : " + String(input_type));
   DEBUG_SERIAL.println("\tmqtt_server : " + String(mqtt_server));
+  DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tquery_period : " + String(query_period));
   DEBUG_SERIAL.println("\tled_gpio : " + String(led_gpio));
   DEBUG_SERIAL.println("\tled_gpio_i : " + String(led_gpio_i));
   DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
-  DEBUG_SERIAL.println("\tmqtt_port : " + String(mqtt_port));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
   DEBUG_SERIAL.println("\tmqtt_user : " + String(mqtt_user));
   DEBUG_SERIAL.println("\tmqtt_passwd : " + String(mqtt_passwd));
@@ -880,11 +879,11 @@ void WifiManagerSetup() {
     DEBUG_SERIAL.println("saving config");
     preferences.putString("input_type", input_type);
     preferences.putString("mqtt_server", mqtt_server);
+    preferences.putString("mqtt_port", mqtt_port);
     preferences.putString("query_period", query_period);
     preferences.putString("led_gpio", led_gpio);
     preferences.putString("led_gpio_i", led_gpio_i);
     preferences.putString("shelly_mac", shelly_mac);
-    preferences.putString("mqtt_port", mqtt_port);
     preferences.putString("mqtt_topic", mqtt_topic);
     preferences.putString("mqtt_user", mqtt_user);
     preferences.putString("mqtt_passwd", mqtt_passwd);
@@ -987,11 +986,12 @@ void setup(void) {
     Udp.begin(multicastPort);
   }
 
+  // Set Up Modbus TCP for SUNSPEC register query
   if (dataSUNSPEC) {
     modbus1.client();
     modbus_ip.fromString(mqtt_server);
     if (!modbus1.isConnected(modbus_ip)) {  // reuse mqtt server adresss for modbus adress
-      modbus1.connect(modbus_ip, modbus_port);
+      modbus1.connect(modbus_ip, String(mqtt_port).toInt());
       Serial.println("Trying to connect SUNSPEC powermeter data");
     }
   }
@@ -1077,7 +1077,6 @@ void loop() {
     }
    
   }
-
   if (dataHTTP) {
     currentMillis = millis();
     if (currentMillis - startMillis >= period) {
