@@ -20,11 +20,13 @@
 #include <WiFiClient.h>
 #include <ESPAsyncWebServer.h>
 #include <WiFiUdp.h>
+#include <ModbusIP_ESP8266.h>
 
 #define DEBUG true // set to false for no DEBUG output
 #define DEBUG_SERIAL if(DEBUG)Serial
 
-unsigned long startMillis;
+unsigned long startMillis = 0;
+unsigned long startMillis_sunspec = 0;
 unsigned long currentMillis;
 
 // define your default values here, if there are different values in config.json, they are overwritten.
@@ -46,6 +48,12 @@ char shelly_fw_id[32] = "20241011-114455/1.4.4-g6d2a586";
 char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
+
+IPAddress modbus_ip;
+ModbusIP modbus1;
+int modbus_port = 502; // for KSEM Modbus TCIP Slave Port=502
+int modbus_device = 71; // for KSEM Device = 71
+int16_t modbus_result[256];
 
 const uint8_t defaultVoltage = 230;
 const uint8_t defaultFrequency = 50;
@@ -78,9 +86,9 @@ bool dataMQTT = false;
 bool dataSMA = false;
 bool dataSHRDZM = false;
 bool dataHTTP = false;
+bool dataSUNSPEC = false;
 
-struct PowerData
-{
+struct PowerData {
   double current;
   double voltage;
   double power;
@@ -89,8 +97,7 @@ struct PowerData
   double frequency;
 };
 
-struct EnergyData
-{
+struct EnergyData {
   double gridfeedin;
   double consumption;
 };
@@ -112,16 +119,16 @@ WiFiUDP Udp;
 HTTPClient http;
 WiFiUDP UdpRPC;
 #ifdef ESP32
-  #define UDPPRINT print
+#define UDPPRINT print
 #else
-  #define UDPPRINT write
+#define UDPPRINT write
 #endif
 
 double round2(double value) {
   return (int)(value * 100 + 0.5) / 100.0;
 }
 
-JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
+JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
   for (size_t n = 0; path[n]; n++) {
     // Not a full array support, but works for Shelly 3EM emeters array!
     if (path[n] == '[') {
@@ -129,7 +136,7 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
       path += n + 4;
       n = 0;
     }
-    if (path[n] == '.' ) {
+    if (path[n] == '.') {
       variant = variant[JsonString(path, n)];
       path += n + 1;
       n = 0;
@@ -139,7 +146,7 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char* path) {
 }
 
 void setPowerData(double totalPower) {
-  for(int i=0;i<=2;i++) {
+  for (int i = 0; i <= 2; i++) {
     PhasePower[i].power = round2(totalPower * 0.3333);
     PhasePower[i].voltage = defaultVoltage;
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
@@ -155,7 +162,7 @@ void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
   PhasePower[0].power = round2(phase1Power);
   PhasePower[1].power = round2(phase2Power);
   PhasePower[2].power = round2(phase3Power);
-  for(int i=0;i<=2;i++) {
+  for (int i = 0; i <= 2; i++) {
     PhasePower[i].voltage = defaultVoltage;
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
     PhasePower[i].apparentPower = PhasePower[i].power;
@@ -171,7 +178,7 @@ void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
 }
 
 void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
-  for(int i=0;i<=2;i++) {
+  for (int i = 0; i <= 2; i++) {
     PhaseEnergy[i].consumption = round2(totalEnergyGridSupply * 0.3333);
     PhaseEnergy[i].gridfeedin = round2(totalEnergyGridFeedIn * 0.3333);
   }
@@ -182,7 +189,7 @@ void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
 }
 
 //callback notifying us of the need to save WifiManager config
-void saveConfigCallback () {
+void saveConfigCallback() {
   DEBUG_SERIAL.println("Should save config");
   shouldSaveConfig = true;
 }
@@ -195,20 +202,20 @@ void setJsonPathPower(JsonDocument json) {
     double power3 = resolveJsonPath(json, power_l3_path);
     setPowerData(power1, power2, power3);
   } else {
-      // Check if BOTH paths (Import = power_path, Export = pwr_export_path) are defined
-      if ((strcmp(power_path, "") != 0) && (strcmp(pwr_export_path, "") != 0)) {
-          DEBUG_SERIAL.println("Resolving net power (import - export)");
-          double importPower = resolveJsonPath(json, power_path).as<double>();
-          double exportPower = resolveJsonPath(json, pwr_export_path).as<double>();
-          double netPower = importPower - exportPower;
-          setPowerData(netPower);
-      }
-      // (FALLBACK): Only the normal power_path (import path) is defined (old logic)
-      else if (strcmp(power_path, "") != 0) {
-          DEBUG_SERIAL.println("Resolving monophase (single path only)");
-          double power = resolveJsonPath(json, power_path).as<double>();
-          setPowerData(power);
-      }
+    // Check if BOTH paths (Import = power_path, Export = pwr_export_path) are defined
+    if ((strcmp(power_path, "") != 0) && (strcmp(pwr_export_path, "") != 0)) {
+      DEBUG_SERIAL.println("Resolving net power (import - export)");
+      double importPower = resolveJsonPath(json, power_path).as<double>();
+      double exportPower = resolveJsonPath(json, pwr_export_path).as<double>();
+      double netPower = importPower - exportPower;
+      setPowerData(netPower);
+    }
+    // (FALLBACK): Only the normal power_path (import path) is defined (old logic)
+    else if (strcmp(power_path, "") != 0) {
+      DEBUG_SERIAL.println("Resolving monophase (single path only)");
+      double power = resolveJsonPath(json, power_path).as<double>();
+      setPowerData(power);
+    }
   }
   if ((strcmp(energy_in_path, "") != 0) && (strcmp(energy_out_path, "") != 0)) {
     double energyIn = resolveJsonPath(json, energy_in_path);
@@ -220,35 +227,35 @@ void setJsonPathPower(JsonDocument json) {
 void rpcWrapper() {
   JsonDocument jsonResponse;
   JsonDocument doc;
-  deserializeJson(doc,serJsonResponse);
+  deserializeJson(doc, serJsonResponse);
   jsonResponse["id"] = rpcId;
   jsonResponse["src"] = shelly_name;
-  if (strcmp(rpcUser,"EMPTY") != 0) {
+  if (strcmp(rpcUser, "EMPTY") != 0) {
     jsonResponse["dst"] = rpcUser;
   }
   jsonResponse["result"] = doc;
-  serializeJson(jsonResponse,serJsonResponse);
+  serializeJson(jsonResponse, serJsonResponse);
 }
 
 void blinkled(int duration) {
-  if(led > 0) {
-    if(led_i) {
+  if (led > 0) {
+    if (led_i) {
       digitalWrite(led, HIGH);
     } else {
       digitalWrite(led, LOW);
-    }  
+    }
     ledOffTime = millis() + duration;
   }
 }
 
 void handleblinkled() {
-  if(led > 0) {
+  if (led > 0) {
     if (ledOffTime > 0 && millis() > ledOffTime) {
-      if(led_i) {
+      if (led_i) {
         digitalWrite(led, LOW);
       } else {
         digitalWrite(led, HIGH);
-      }		
+      }
       ledOffTime = 0;
     }
   }
@@ -267,12 +274,12 @@ void GetDeviceInfo() {
   jsonResponse["app"] = "Pro3EM";
   jsonResponse["auth_en"] = false;
   jsonResponse["profile"] = "triphase";
-  serializeJson(jsonResponse,serJsonResponse);
+  serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
   blinkled(ledblinkduration);
 }
 
-void EMGetStatus(){
+void EMGetStatus() {
   JsonDocument jsonResponse;
   jsonResponse["id"] = 0;
   jsonResponse["a_current"] = PhasePower[0].current;
@@ -293,10 +300,10 @@ void EMGetStatus(){
   jsonResponse["c_aprt_power"] = PhasePower[2].apparentPower;
   jsonResponse["c_pf"] = PhasePower[2].powerFactor;
   jsonResponse["c_freq"] = PhasePower[2].frequency;
-  jsonResponse["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / defaultVoltage);
+  jsonResponse["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / ((float)defaultVoltage));
   jsonResponse["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
   jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
-  serializeJson(jsonResponse,serJsonResponse);
+  serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
   blinkled(ledblinkduration);
 }
@@ -312,7 +319,7 @@ void EMDataGetStatus() {
   jsonResponse["c_total_act_ret_energy"] = PhaseEnergy[2].gridfeedin;
   jsonResponse["total_act"] = PhaseEnergy[0].consumption + PhaseEnergy[1].consumption + PhaseEnergy[2].consumption;
   jsonResponse["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
-  serializeJson(jsonResponse,serJsonResponse);
+  serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
   blinkled(ledblinkduration);
 }
@@ -325,61 +332,60 @@ void EMGetConfig() {
   jsonResponse["phase_selector"] = "a";
   jsonResponse["monitor_phase_sequence"] = true;
   jsonResponse["ct_type"] = "120A";
-  serializeJson(jsonResponse,serJsonResponse);
+  serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
   blinkled(ledblinkduration);
 }
 
-void webSocketEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len) {
+void webSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
   JsonDocument json;
-  switch(type) {
+  switch (type) {
     case WS_EVT_DISCONNECT:
-        DEBUG_SERIAL.printf("[%u] Websocket: disconnected!\n", client->id());
-        break;
+      DEBUG_SERIAL.printf("[%u] Websocket: disconnected!\n", client->id());
+      break;
     case WS_EVT_CONNECT:
-        DEBUG_SERIAL.printf("[%u] Websocket: connected from %s\n", client->id(), client->remoteIP().toString().c_str());
-        break;
+      DEBUG_SERIAL.printf("[%u] Websocket: connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+      break;
     case WS_EVT_DATA:
-        {
-          AwsFrameInfo *info = (AwsFrameInfo *)arg;
-          if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-            data[len] = 0;
-            deserializeJson(json, data);
-            rpcId = json["id"];
-            if (json["method"] == "Shelly.GetDeviceInfo") {
-              strcpy(rpcUser, "EMPTY");
-              GetDeviceInfo();
-              rpcWrapper();
-              webSocket.textAll(serJsonResponse);
-            } else if(json["method"] == "EM.GetStatus") {
-              strcpy(rpcUser,json["src"]);
-              EMGetStatus();
-              rpcWrapper();
-              webSocket.textAll(serJsonResponse);
-            } else if(json["method"] == "EMData.GetStatus") {
-              strcpy(rpcUser,json["src"]);
-              EMDataGetStatus();
-              rpcWrapper();
-              webSocket.textAll(serJsonResponse);
-            } else if(json["method"] == "EM.GetConfig") {
-              EMGetConfig();
-              rpcWrapper();
-              webSocket.textAll(serJsonResponse);
-            }
-            else {
-              DEBUG_SERIAL.printf("Websocket: unknown request: %s\n", data);
-            }
+      {
+        AwsFrameInfo *info = (AwsFrameInfo *)arg;
+        if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+          data[len] = 0;
+          deserializeJson(json, data);
+          rpcId = json["id"];
+          if (json["method"] == "Shelly.GetDeviceInfo") {
+            strcpy(rpcUser, "EMPTY");
+            GetDeviceInfo();
+            rpcWrapper();
+            webSocket.textAll(serJsonResponse);
+          } else if (json["method"] == "EM.GetStatus") {
+            strcpy(rpcUser, json["src"]);
+            EMGetStatus();
+            rpcWrapper();
+            webSocket.textAll(serJsonResponse);
+          } else if (json["method"] == "EMData.GetStatus") {
+            strcpy(rpcUser, json["src"]);
+            EMDataGetStatus();
+            rpcWrapper();
+            webSocket.textAll(serJsonResponse);
+          } else if (json["method"] == "EM.GetConfig") {
+            EMGetConfig();
+            rpcWrapper();
+            webSocket.textAll(serJsonResponse);
+          } else {
+            DEBUG_SERIAL.printf("Websocket: unknown request: %s\n", data);
           }
-          break;
         }
+        break;
+      }
     case WS_EVT_PING:
     case WS_EVT_PONG:
     case WS_EVT_ERROR:
-        break;
+      break;
   }
 }
 
-void mqtt_callback(char* topic, byte* payload, unsigned int length) {
+void mqtt_callback(char *topic, byte *payload, unsigned int length) {
   JsonDocument json;
   deserializeJson(json, payload, length);
   setJsonPathPower(json);
@@ -416,20 +422,19 @@ void parseUdpRPC() {
         GetDeviceInfo();
         rpcWrapper();
         UdpRPC.UDPPRINT(serJsonResponse.c_str());
-      } else if(json["method"] == "EM.GetStatus") {
+      } else if (json["method"] == "EM.GetStatus") {
         EMGetStatus();
         rpcWrapper();
         UdpRPC.UDPPRINT(serJsonResponse.c_str());
-      } else if(json["method"] == "EMData.GetStatus") {
+      } else if (json["method"] == "EMData.GetStatus") {
         EMDataGetStatus();
         rpcWrapper();
         UdpRPC.UDPPRINT(serJsonResponse.c_str());
-      } else if(json["method"] == "EM.GetConfig") {
+      } else if (json["method"] == "EM.GetConfig") {
         EMGetConfig();
         rpcWrapper();
         UdpRPC.UDPPRINT(serJsonResponse.c_str());
-      }
-      else {
+      } else {
         DEBUG_SERIAL.printf("RPC over UDP: unknown request: %s\n", buffer);
       }
       UdpRPC.endPacket();
@@ -441,168 +446,158 @@ void parseSMA() {
   uint8_t buffer[1024];
   int packetSize = Udp.parsePacket();
   if (packetSize) {
-      int rSize = Udp.read(buffer, 1024);
-      if (buffer[0] != 'S' || buffer[1] != 'M' || buffer[2] != 'A') {
-          DEBUG_SERIAL.println("Not an SMA packet?");
-          return;
-      }
-      uint16_t grouplen;
-      uint16_t grouptag;
-      uint8_t* offset = buffer + 4;
-      do {
-          grouplen = (offset[0] << 8) + offset[1];
-          grouptag = (offset[2] << 8) + offset[3];
+    int rSize = Udp.read(buffer, 1024);
+    if (buffer[0] != 'S' || buffer[1] != 'M' || buffer[2] != 'A') {
+      DEBUG_SERIAL.println("Not an SMA packet?");
+      return;
+    }
+    uint16_t grouplen;
+    uint16_t grouptag;
+    uint8_t *offset = buffer + 4;
+    do {
+      grouplen = (offset[0] << 8) + offset[1];
+      grouptag = (offset[2] << 8) + offset[3];
+      offset += 4;
+      if (grouplen == 0xffff) return;
+      if (grouptag == 0x02A0 && grouplen == 4) {
+        offset += 4;
+      } else if (grouptag == 0x0010) {
+        uint8_t *endOfGroup = offset + grouplen;
+        // uint16_t protocolID = (offset[0] << 8) + offset[1];
+        offset += 2;
+        // uint16_t susyID = (offset[0] << 8) + offset[1];
+        offset += 2;
+        // uint32_t serial = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
+        offset += 4;
+        // uint32_t timestamp = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
+        offset += 4;
+        while (offset < endOfGroup) {
+          uint8_t channel = offset[0];
+          uint8_t index = offset[1];
+          uint8_t type = offset[2];
+          // uint8_t tarif = offset[3];
           offset += 4;
-          if (grouplen == 0xffff) return;
-          if (grouptag == 0x02A0 && grouplen == 4) {
-              offset += 4;
-          } else if (grouptag == 0x0010) {
-              uint8_t* endOfGroup = offset + grouplen;
-              uint16_t protocolID = (offset[0] << 8) + offset[1];
-              offset += 2;
-              uint16_t susyID = (offset[0] << 8) + offset[1];
-              offset += 2;
-              uint32_t serial = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
-              offset += 4;
-              uint32_t timestamp = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
-              offset += 4;
-              while (offset < endOfGroup) {
-                  uint8_t channel = offset[0];
-                  uint8_t index = offset[1];
-                  uint8_t type = offset[2];
-                  uint8_t tarif = offset[3];
-                  offset += 4;
-                  if (type == 8) {
-                    uint64_t data = ((uint64_t)offset[0] << 56) +
-                                  ((uint64_t)offset[1] << 48) +
-                                  ((uint64_t)offset[2] << 40) +
-                                  ((uint64_t)offset[3] << 32) +
-                                  ((uint64_t)offset[4] << 24) +
-                                  ((uint64_t)offset[5] << 16) +
-                                  ((uint64_t)offset[6] << 8) +
-                                  offset[7];
-                    offset += 8;
-                    switch (index) {
-                      case 21:
-                        PhaseEnergy[0].consumption = data / 3600000;
-                        break;
-                      case 22:
-                        PhaseEnergy[0].gridfeedin = data / 3600000;
-                        break;
-                      case 41:
-                        PhaseEnergy[1].consumption = data / 3600000;
-                        break;
-                      case 42:
-                        PhaseEnergy[1].gridfeedin = data / 3600000;
-                        break;
-                      case 61:
-                        PhaseEnergy[2].consumption = data / 3600000;
-                        break;
-                      case 62:
-                        PhaseEnergy[2].gridfeedin = data / 3600000;
-                        break;
-                    }
-                  } else if (type == 4) {
-                    uint32_t data = (offset[0] << 24) +
-                    (offset[1] << 16) +
-                    (offset[2] << 8) +
-                    offset[3];
-                    offset += 4;
-                    switch (index) {
-                    case 1:
-                      // 1.4.0 Total grid power in dW - unused
-                      break;
-                    case 2:
-                      // 2.4.0 Total feed-in power in dW - unused
-                      break;
-                    case 21:
-                      PhasePower[0].power = round2(data * 0.1);
-                      PhasePower[0].frequency = defaultFrequency;
-                      break;
-                    case 22:
-                      PhasePower[0].power -= round2(data * 0.1);
-                      break;
-                    case 29:
-                      PhasePower[0].apparentPower = round2(data * 0.1);
-                      break;
-                    case 30:
-                      PhasePower[0].apparentPower -= round2(data * 0.1);
-                      break;
-                    case 31:
-                      PhasePower[0].current = round2(data * 0.001);
-                      break;
-                    case 32:
-                      PhasePower[0].voltage = round2(data * 0.001);
-                      break;
-                    case 33:
-                      PhasePower[0].powerFactor = round2(data * 0.001);
-                      break;
-                    case 41:
-                      PhasePower[1].power = round2(data * 0.1);
-                      PhasePower[1].frequency = defaultFrequency;
-                      break;
-                    case 42:
-                      PhasePower[1].power -= round2(data * 0.1);
-                      break;
-                    case 49:
-                      PhasePower[1].apparentPower = round2(data * 0.1);
-                      break;
-                    case 50:
-                      PhasePower[1].apparentPower -= round2(data * 0.1);
-                      break;
-                    case 51:
-                      PhasePower[1].current = round2(data * 0.001);
-                      break;
-                    case 52:
-                      PhasePower[1].voltage = round2(data * 0.001);
-                      break;
-                    case 53:
-                      PhasePower[1].powerFactor = round2(data * 0.001);
-                      break;
-                    case 61:
-                      PhasePower[2].power = round2(data * 0.1);
-                      PhasePower[2].frequency = defaultFrequency;
-                      break;
-                    case 62:
-                      PhasePower[2].power -= round2(data * 0.1);
-                      break;
-                    case 69:
-                      PhasePower[2].apparentPower = round2(data * 0.1);
-                      break;
-                    case 70:
-                      PhasePower[2].apparentPower -= round2(data * 0.1);
-                      break;
-                    case 71:
-                      PhasePower[2].current = round2(data * 0.001);
-                      break;
-                    case 72:
-                      PhasePower[2].voltage = round2(data * 0.001);
-                      break;
-                    case 73:
-                      PhasePower[2].powerFactor = round2(data * 0.001);
-                      break;
-                    default:
-                      break;
-                    }
-                  } else if (channel == 144) {
-                    // optional handling of version number
-                    offset += 4;
-                  } else {
-                      offset += type;
-                      DEBUG_SERIAL.println("Unknown measurement");
-                  }
-              }
-          } else if (grouptag == 0) {
-              // end marker
-              offset += grouplen;
+          if (type == 8) {
+            uint64_t data = ((uint64_t)offset[0] << 56) + ((uint64_t)offset[1] << 48) + ((uint64_t)offset[2] << 40) + ((uint64_t)offset[3] << 32) + ((uint64_t)offset[4] << 24) + ((uint64_t)offset[5] << 16) + ((uint64_t)offset[6] << 8) + offset[7];
+            offset += 8;
+            switch (index) {
+              case 21:
+                PhaseEnergy[0].consumption = data / 3600000;
+                break;
+              case 22:
+                PhaseEnergy[0].gridfeedin = data / 3600000;
+                break;
+              case 41:
+                PhaseEnergy[1].consumption = data / 3600000;
+                break;
+              case 42:
+                PhaseEnergy[1].gridfeedin = data / 3600000;
+                break;
+              case 61:
+                PhaseEnergy[2].consumption = data / 3600000;
+                break;
+              case 62:
+                PhaseEnergy[2].gridfeedin = data / 3600000;
+                break;
+            }
+          } else if (type == 4) {
+            uint32_t data = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
+            offset += 4;
+            switch (index) {
+              case 1:
+                // 1.4.0 Total grid power in dW - unused
+                break;
+              case 2:
+                // 2.4.0 Total feed-in power in dW - unused
+                break;
+              case 21:
+                PhasePower[0].power = round2(data * 0.1);
+                PhasePower[0].frequency = defaultFrequency;
+                break;
+              case 22:
+                PhasePower[0].power -= round2(data * 0.1);
+                break;
+              case 29:
+                PhasePower[0].apparentPower = round2(data * 0.1);
+                break;
+              case 30:
+                PhasePower[0].apparentPower -= round2(data * 0.1);
+                break;
+              case 31:
+                PhasePower[0].current = round2(data * 0.001);
+                break;
+              case 32:
+                PhasePower[0].voltage = round2(data * 0.001);
+                break;
+              case 33:
+                PhasePower[0].powerFactor = round2(data * 0.001);
+                break;
+              case 41:
+                PhasePower[1].power = round2(data * 0.1);
+                PhasePower[1].frequency = defaultFrequency;
+                break;
+              case 42:
+                PhasePower[1].power -= round2(data * 0.1);
+                break;
+              case 49:
+                PhasePower[1].apparentPower = round2(data * 0.1);
+                break;
+              case 50:
+                PhasePower[1].apparentPower -= round2(data * 0.1);
+                break;
+              case 51:
+                PhasePower[1].current = round2(data * 0.001);
+                break;
+              case 52:
+                PhasePower[1].voltage = round2(data * 0.001);
+                break;
+              case 53:
+                PhasePower[1].powerFactor = round2(data * 0.001);
+                break;
+              case 61:
+                PhasePower[2].power = round2(data * 0.1);
+                PhasePower[2].frequency = defaultFrequency;
+                break;
+              case 62:
+                PhasePower[2].power -= round2(data * 0.1);
+                break;
+              case 69:
+                PhasePower[2].apparentPower = round2(data * 0.1);
+                break;
+              case 70:
+                PhasePower[2].apparentPower -= round2(data * 0.1);
+                break;
+              case 71:
+                PhasePower[2].current = round2(data * 0.001);
+                break;
+              case 72:
+                PhasePower[2].voltage = round2(data * 0.001);
+                break;
+              case 73:
+                PhasePower[2].powerFactor = round2(data * 0.001);
+                break;
+              default:
+                break;
+            }
+          } else if (channel == 144) {
+            // optional handling of version number
+            offset += 4;
           } else {
-              DEBUG_SERIAL.print("unhandled group ");
-              DEBUG_SERIAL.print(grouptag);
-              DEBUG_SERIAL.print(" with len=");
-              DEBUG_SERIAL.println(grouplen);
-              offset += grouplen;
+            offset += type;
+            DEBUG_SERIAL.println("Unknown measurement");
           }
-      } while (grouplen > 0 && offset + 4 < buffer + rSize);
+        }
+      } else if (grouptag == 0) {
+        // end marker
+        offset += grouplen;
+      } else {
+        DEBUG_SERIAL.print("unhandled group ");
+        DEBUG_SERIAL.print(grouptag);
+        DEBUG_SERIAL.print(" with len=");
+        DEBUG_SERIAL.println(grouplen);
+        offset += grouplen;
+      }
+    } while (grouplen > 0 && offset + 4 < buffer + rSize);
   }
 }
 
@@ -621,8 +616,102 @@ void parseSHRDZM() {
     if (json["data"]["1.8.0"].is<JsonVariant>() && json["data"]["2.8.0"].is<JsonVariant>()) {
       double energyIn = 0.001 * json["data"]["1.8.0"].as<double>();
       double energyOut = 0.001 * json["data"]["2.8.0"].as<double>();
-      setEnergyData(energyIn,energyOut);
+      setEnergyData(energyIn, energyOut);
     }
+  }
+}
+
+double SUNSPEC_scale(int n)
+{
+  double val=1.0;
+  switch (n) {
+    case -3: val=0.001; break;
+    case -2: val=0.01; break;
+    case -1: val=0.1; break;
+    case 0: val=1.0; break;
+    case 1: val=10.0; break;
+    case 2: val=100.0; break;
+    default:
+    val=1.0;
+  }
+  return val;
+}
+
+void parseSUNSPEC() {
+  #define SUNSPEC_BASE 40072
+  #define SUNSPEC_VOLTAGE 40077
+  #define SUNSPEC_VOLTAGE_SCALE 40084
+  #define SUNSPEC_REAL_POWER 40088
+  #define SUNSPEC_REAL_POWER_SCALE 40091
+  #define SUNSPEC_APPARANT_POWER 40093
+  #define SUNSPEC_APPARANT_POWER_SCALE 40096
+  #define SUNSPEC_CURRENT 40072
+  #define SUNSPEC_CURRENT_SCALE 40075
+  #define SUNSPEC_POWER_FACTOR 40103
+  #define SUNSPEC_POWER_FACTOR_SCALE 40106
+  #define SUNSPEC_FREQUENCY 40085
+  #define SUNSPEC_FREQUENCY_SCALE 40086
+  
+  modbus_ip.fromString(mqtt_server);
+  if (!modbus1.isConnected(modbus_ip)) {
+    modbus1.connect(modbus_ip, modbus_port);
+  } else {
+    uint16_t transaction = modbus1.readHreg(modbus_ip, SUNSPEC_BASE, (uint16_t*) &modbus_result[0], 64, nullptr, modbus_device);
+    delay(10);
+    modbus1.task();
+    int t = 0;
+    while (modbus1.isTransaction(transaction)) {
+      modbus1.task();
+      delay(10);
+      t++;
+      if (t > 30) {
+        DEBUG_SERIAL.println("Timeout SUNSPEC");
+        //prolong=10;
+        modbus1.disconnect(modbus_ip);
+        break;
+      }
+    }
+    int32_t power = 0;
+    if (t<=300) {
+      double scale_V=SUNSPEC_scale(modbus_result[SUNSPEC_VOLTAGE_SCALE-SUNSPEC_BASE]);
+      double scale_real_power=SUNSPEC_scale(modbus_result[SUNSPEC_REAL_POWER_SCALE-SUNSPEC_BASE]);
+      double scale_apparant_power=SUNSPEC_scale(modbus_result[SUNSPEC_APPARANT_POWER_SCALE-SUNSPEC_BASE]);
+      double scale_current=SUNSPEC_scale(modbus_result[SUNSPEC_CURRENT_SCALE-SUNSPEC_BASE]);
+      double scale_powerfactor=SUNSPEC_scale(modbus_result[SUNSPEC_POWER_FACTOR_SCALE-SUNSPEC_BASE]);
+      double scale_frequency=SUNSPEC_scale(modbus_result[SUNSPEC_FREQUENCY_SCALE-SUNSPEC_BASE]);
+
+      for (int n=0;n<3;n++) {
+        PhasePower[n].power=modbus_result[SUNSPEC_REAL_POWER-SUNSPEC_BASE+n]*scale_real_power;
+        PhasePower[n].apparentPower=modbus_result[SUNSPEC_APPARANT_POWER-SUNSPEC_BASE+n]*scale_apparant_power;
+        PhasePower[n].current= modbus_result[SUNSPEC_CURRENT-SUNSPEC_BASE+n]*scale_current;
+        PhasePower[n].powerFactor=modbus_result[SUNSPEC_POWER_FACTOR-SUNSPEC_BASE+n]*scale_powerfactor;
+        PhasePower[n].voltage=modbus_result[SUNSPEC_VOLTAGE-SUNSPEC_BASE+n]*scale_V;
+        PhasePower[n].frequency=modbus_result[SUNSPEC_FREQUENCY-SUNSPEC_BASE]*scale_frequency;
+        power+= PhasePower[n].power;
+      }
+
+      #define SUNSPEC_REAL_ENERGY_EXPORTED 40109
+      #define SUNSPEC_REAL_IMPORTED_EXPORTED 40117
+      #define SUNSPEC_REAL_ENERGY_SCALE 40123
+      double scale_real_energy=SUNSPEC_scale(modbus_result[SUNSPEC_REAL_ENERGY_SCALE-SUNSPEC_BASE]);
+        for (int n=0;n<3;n++) {
+          uint32_t p=0;
+          uint8_t *p_u8=(uint8_t *)&modbus_result[SUNSPEC_REAL_IMPORTED_EXPORTED-SUNSPEC_BASE+2*n];
+          p|=((uint32_t)p_u8[2])<<0;
+        p|=((uint32_t)p_u8[3])<<8;
+        p|=((uint32_t)p_u8[0])<<16;
+        p|=((uint32_t)p_u8[1])<<24;
+          PhaseEnergy[n].consumption=p/1000.0*scale_real_energy;        
+          p=0;
+          p_u8=(uint8_t *)&modbus_result[SUNSPEC_REAL_ENERGY_EXPORTED-SUNSPEC_BASE+2*n];
+          p|=((uint32_t)p_u8[2])<<0;
+        p|=((uint32_t)p_u8[3])<<8;
+        p|=((uint32_t)p_u8[0])<<16;
+        p|=((uint32_t)p_u8[1])<<24;
+          PhaseEnergy[n].gridfeedin = -p/1000.0*scale_real_energy;
+        }
+    }
+    DEBUG_SERIAL.printf("SUNSPEC power: %d,%d\n\r", t, power);
   }
 }
 
@@ -644,7 +733,7 @@ void WifiManagerSetup() {
   // Set Shelly ID to ESP's MAC address by default
   uint8_t mac[6];
   WiFi.macAddress(mac);
-  sprintf (shelly_mac, "%02x%02x%02x%02x%02x%02x", mac [0], mac [1], mac [2], mac [3], mac [4], mac [5]);
+  sprintf(shelly_mac, "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
   preferences.begin("e2s_config", false);
   strcpy(input_type, preferences.getString("input_type", input_type).c_str());
@@ -687,7 +776,7 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. \"ENERGY.FeedIn\"", energy_out_path, 60);
 
   WiFiManager wifiManager;
-  if(!DEBUG) {
+  if (!DEBUG) {
     wifiManager.setDebugOutput(false);
   }
   wifiManager.setTitle("Energy2Shelly for ESP");
@@ -763,7 +852,7 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tenergy_out_path : " + String(energy_out_path));
 
 
-  if(strcmp(input_type, "SMA") == 0) {
+  if (strcmp(input_type, "SMA") == 0) {
     dataSMA = true;
     DEBUG_SERIAL.println("Enabling SMA Multicast data input");
   } else if (strcmp(input_type, "SHRDZM") == 0) {
@@ -772,12 +861,16 @@ void WifiManagerSetup() {
   } else if (strcmp(input_type, "HTTP") == 0) {
     dataHTTP = true;
     DEBUG_SERIAL.println("Enabling generic HTTP data input");
-  } else {
+  } else if (strcmp(input_type, "SUNSPEC") == 0) {
+    dataSUNSPEC = true;
+    DEBUG_SERIAL.println("Enabling SUNSPEC data input");
+  }
+  else {
     dataMQTT = true;
     DEBUG_SERIAL.println("Enabling MQTT data input");
   }
-  
-  if(strcmp(led_gpio_i, "true") == 0) {
+
+  if (strcmp(led_gpio_i, "true") == 0) {
     led_i = true;
   } else {
     led_i = false;
@@ -811,19 +904,19 @@ void WifiManagerSetup() {
 void setup(void) {
   DEBUG_SERIAL.begin(115200);
   WifiManagerSetup();
-  
-if(String(led_gpio).toInt() > 0) {
-  led = String(led_gpio).toInt();
-}
 
-if(led > 0) {
-  pinMode(led, OUTPUT);
-  if(led_i) {
-    digitalWrite(led, LOW);
-  } else {
-    digitalWrite(led, HIGH);
-  }  
-}
+  if (String(led_gpio).toInt() > 0) {
+    led = String(led_gpio).toInt();
+  }
+
+  if (led > 0) {
+    pinMode(led, OUTPUT);
+    if (led_i) {
+      digitalWrite(led, LOW);
+    } else {
+      digitalWrite(led, HIGH);
+    }
+  }
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
@@ -873,102 +966,119 @@ if(led > 0) {
   UdpRPC.begin(1010);
 
   // Set up MQTT
-  if(dataMQTT) {
+  if (dataMQTT) {
     mqtt_client.setBufferSize(2048);
     mqtt_client.setServer(mqtt_server, String(mqtt_port).toInt());
     mqtt_client.setCallback(mqtt_callback);
   }
 
   // Set Up Multicast for SMA Energy Meter
-  if(dataSMA) {
+  if (dataSMA) {
     Udp.begin(multicastPort);
-    #ifdef ESP8266
-      Udp.beginMulticast(WiFi.localIP(), multicastIP, multicastPort);
-    #else
-      Udp.beginMulticast(multicastIP, multicastPort);
-    #endif
+#ifdef ESP8266
+    Udp.beginMulticast(WiFi.localIP(), multicastIP, multicastPort);
+#else
+    Udp.beginMulticast(multicastIP, multicastPort);
+#endif
   }
 
   // Set Up UDP for SHRDZM smart meter interface
-  if(dataSHRDZM) {
+  if (dataSHRDZM) {
     Udp.begin(multicastPort);
   }
 
+  if (dataSUNSPEC) {
+    modbus1.client();
+    modbus_ip.fromString(mqtt_server);
+    if (!modbus1.isConnected(modbus_ip)) {  // reuse mqtt server adresss for modbus adress
+      modbus1.connect(modbus_ip, modbus_port);
+      Serial.println("Trying to connect SUNSPEC powermeter data");
+    }
+  }
+
   // Set Up HTTP query
-  if(dataHTTP) {
+  if (dataHTTP) {
     period = atol(query_period);
     startMillis = millis();
     http.useHTTP10(true);
   }
 
   // Set up mDNS responder
-  strcat(shelly_name,shelly_mac);
+  strcat(shelly_name, shelly_mac);
   if (!MDNS.begin(shelly_name)) {
     DEBUG_SERIAL.println("Error setting up MDNS responder!");
   }
 
-  #ifdef ESP32
-    MDNS.addService("http", "tcp", 80);
-    MDNS.addService("shelly", "tcp", 80);
-    mdns_txt_item_t serviceTxtData[4] = {
-      {"fw_id",shelly_fw_id},
-      {"arch","esp8266"},
-      {"id",shelly_name},
-      {"gen",shelly_gen}
-    };
-    mdns_service_instance_name_set("_http", "_tcp", shelly_name);
-    mdns_service_txt_set("_http", "_tcp", serviceTxtData, 4);
-    mdns_service_instance_name_set("_shelly", "_tcp", shelly_name);
-    mdns_service_txt_set("_shelly", "_tcp", serviceTxtData, 4);
-  #else
-    hMDNSService = MDNS.addService(0, "http", "tcp", 80);
-    hMDNSService2 = MDNS.addService(0, "shelly", "tcp", 80);
-    if (hMDNSService) {
-      MDNS.setServiceName(hMDNSService, shelly_name);
-      MDNS.addServiceTxt(hMDNSService, "fw_id", shelly_fw_id);
-      MDNS.addServiceTxt(hMDNSService, "arch", "esp8266");
-      MDNS.addServiceTxt(hMDNSService, "id", shelly_name);
-      MDNS.addServiceTxt(hMDNSService, "gen", shelly_gen);
-    }
-    if (hMDNSService2) {
-      MDNS.setServiceName(hMDNSService2, shelly_name);
-      MDNS.addServiceTxt(hMDNSService2, "fw_id", shelly_fw_id);
-      MDNS.addServiceTxt(hMDNSService2, "arch", "esp8266");
-      MDNS.addServiceTxt(hMDNSService2, "id", shelly_name);
-      MDNS.addServiceTxt(hMDNSService2, "gen", shelly_gen);
-    }
-  #endif
+#ifdef ESP32
+  MDNS.addService("http", "tcp", 80);
+  MDNS.addService("shelly", "tcp", 80);
+  mdns_txt_item_t serviceTxtData[4] = {
+    { "fw_id", shelly_fw_id },
+    { "arch", "esp8266" },
+    { "id", shelly_name },
+    { "gen", shelly_gen }
+  };
+  mdns_service_instance_name_set("_http", "_tcp", shelly_name);
+  mdns_service_txt_set("_http", "_tcp", serviceTxtData, 4);
+  mdns_service_instance_name_set("_shelly", "_tcp", shelly_name);
+  mdns_service_txt_set("_shelly", "_tcp", serviceTxtData, 4);
+#else
+  hMDNSService = MDNS.addService(0, "http", "tcp", 80);
+  hMDNSService2 = MDNS.addService(0, "shelly", "tcp", 80);
+  if (hMDNSService) {
+    MDNS.setServiceName(hMDNSService, shelly_name);
+    MDNS.addServiceTxt(hMDNSService, "fw_id", shelly_fw_id);
+    MDNS.addServiceTxt(hMDNSService, "arch", "esp8266");
+    MDNS.addServiceTxt(hMDNSService, "id", shelly_name);
+    MDNS.addServiceTxt(hMDNSService, "gen", shelly_gen);
+  }
+  if (hMDNSService2) {
+    MDNS.setServiceName(hMDNSService2, shelly_name);
+    MDNS.addServiceTxt(hMDNSService2, "fw_id", shelly_fw_id);
+    MDNS.addServiceTxt(hMDNSService2, "arch", "esp8266");
+    MDNS.addServiceTxt(hMDNSService2, "id", shelly_name);
+    MDNS.addServiceTxt(hMDNSService2, "gen", shelly_gen);
+  }
+#endif
   DEBUG_SERIAL.println("mDNS responder started");
 }
 
 void loop() {
-  #ifndef ESP32
-    MDNS.update();
-  #endif
+#ifndef ESP32
+  MDNS.update();
+#endif
   parseUdpRPC();
-  if(shouldResetConfig) {
-    #ifdef ESP32
-      WiFi.disconnect(true, true);
-    #else
-      WiFi.disconnect(true);
-    #endif
+  if (shouldResetConfig) {
+#ifdef ESP32
+    WiFi.disconnect(true, true);
+#else
+    WiFi.disconnect(true);
+#endif
     delay(1000);
-    ESP.restart();  
+    ESP.restart();
   }
-  if(dataMQTT) {
+  if (dataMQTT) {
     if (!mqtt_client.connected()) {
       mqtt_reconnect();
     }
     mqtt_client.loop();
   }
-  if(dataSMA) {
+  if (dataSMA) {
     parseSMA();
   }
-  if(dataSHRDZM) {
+  if (dataSHRDZM) {
     parseSHRDZM();
-  
   }
-  if(dataHTTP) {
+  if (dataSUNSPEC) {
+     currentMillis = millis();
+    if (currentMillis - startMillis_sunspec >= period) {
+       parseSUNSPEC();
+      startMillis_sunspec = currentMillis;
+    }
+   
+  }
+
+  if (dataHTTP) {
     currentMillis = millis();
     if (currentMillis - startMillis >= period) {
       queryHTTP();
