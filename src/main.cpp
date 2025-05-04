@@ -48,10 +48,10 @@ char shelly_fw_id[32] = "20241011-114455/1.4.4-g6d2a586";
 char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
+char modbus_dev[10] = "71"; // default for KSEM
 
 IPAddress modbus_ip;
 ModbusIP modbus1;
-int modbus_device = 71; // for KSEM Device = 71
 int16_t modbus_result[256];
 
 const uint8_t defaultVoltage = 230;
@@ -655,7 +655,7 @@ void parseSUNSPEC() {
   if (!modbus1.isConnected(modbus_ip)) {
     modbus1.connect(modbus_ip, String(mqtt_port).toInt());
   } else {
-    uint16_t transaction = modbus1.readHreg(modbus_ip, SUNSPEC_BASE, (uint16_t*) &modbus_result[0], 64, nullptr, modbus_device);
+    uint16_t transaction = modbus1.readHreg(modbus_ip, SUNSPEC_BASE, (uint16_t*) &modbus_result[0], 64, nullptr, String(modbus_dev).toInt());
     delay(10);
     modbus1.task();
     int t = 0;
@@ -663,7 +663,7 @@ void parseSUNSPEC() {
       modbus1.task();
       delay(10);
       t++;
-      if (t > 30) {
+      if (t > 50) {
         DEBUG_SERIAL.println("Timeout SUNSPEC");
         //prolong=10;
         modbus1.disconnect(modbus_ip);
@@ -671,7 +671,7 @@ void parseSUNSPEC() {
       }
     }
     int32_t power = 0;
-    if (t<=300) {
+    if (t<=50) {
       double scale_V=SUNSPEC_scale(modbus_result[SUNSPEC_VOLTAGE_SCALE-SUNSPEC_BASE]);
       double scale_real_power=SUNSPEC_scale(modbus_result[SUNSPEC_REAL_POWER_SCALE-SUNSPEC_BASE]);
       double scale_apparant_power=SUNSPEC_scale(modbus_result[SUNSPEC_APPARANT_POWER_SCALE-SUNSPEC_BASE]);
@@ -745,6 +745,7 @@ void WifiManagerSetup() {
   strcpy(mqtt_topic, preferences.getString("mqtt_topic", mqtt_topic).c_str());
   strcpy(mqtt_user, preferences.getString("mqtt_user", mqtt_user).c_str());
   strcpy(mqtt_passwd, preferences.getString("mqtt_passwd", mqtt_passwd).c_str());
+  strcpy(modbus_dev, preferences.getString("modbus_dev", modbus_dev).c_str());
   strcpy(power_path, preferences.getString("power_path", power_path).c_str());
   strcpy(pwr_export_path, preferences.getString("pwr_export_path", pwr_export_path).c_str());
   strcpy(power_l1_path, preferences.getString("power_l1_path", power_l1_path).c_str());
@@ -754,9 +755,9 @@ void WifiManagerSetup() {
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
 
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
-  WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for ModbusTCP SUNSPEC data", input_type, 40);
-  WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP, query url for generic HTTP or ModbusTCP server IP for SUNSPEC", mqtt_server, 80);
-  WiFiManagerParameter custom_mqtt_port("port", "<b>Port</b><br> for MQTT or ModbusTCP (SUNSPEC)", mqtt_port, 6);
+  WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for Modbus TCP SUNSPEC data", input_type, 40);
+  WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP, query url for generic HTTP or Modbus TCP server IP for SUNSPEC", mqtt_server, 80);
+  WiFiManagerParameter custom_mqtt_port("port", "<b>Port</b><br> for MQTT or Modbus TCP (SUNSPEC)", mqtt_port, 6);
   WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP and SUNSPEC, in milliseconds", query_period, 10);
   WiFiManagerParameter custom_led_gpio("led_gpio", "<b>GPIO</b><br>of internal LED", led_gpio, 3);
   WiFiManagerParameter custom_led_gpio_i("led_gpio_i", "<b>GPIO is inverted</b><br><code>true</code> or <code>false</code>", led_gpio_i, 6);
@@ -765,7 +766,9 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
   WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
   WiFiManagerParameter custom_mqtt_passwd("passwd", "<b>MQTT password</b><br>optional", mqtt_passwd, 40);
-  WiFiManagerParameter custom_section3("<hr><h3>JSON paths for MQTT and generic HTTP</h3>");
+  WiFiManagerParameter custom_section3("<hr><h3>Modbus TCP options</h3>");
+  WiFiManagerParameter custom_modbus_dev("modbus_dev", "<b>Modbus device ID</b><br><code>71</code> for Kostal SEM", modbus_dev, 60);
+  WiFiManagerParameter custom_section4("<hr><h3>JSON paths for MQTT and generic HTTP</h3>");
   WiFiManagerParameter custom_power_path("power_path", "<b>Total power JSON path</b><br>e.g. <code>ENERGY.Power</code> or <code>TRIPHASE</code> for tri-phase data", power_path, 60);
   WiFiManagerParameter custom_pwr_export_path("pwr_export_path", "<b>Export power JSON path</b><br>Optional, for net calc (e.g. \"i-e\"", pwr_export_path, 60);
   WiFiManagerParameter custom_power_l1_path("power_l1_path", "<b>Phase 1 power JSON path</b><br>optional", power_l1_path, 60);
@@ -795,6 +798,8 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_mqtt_user);
   wifiManager.addParameter(&custom_mqtt_passwd);
   wifiManager.addParameter(&custom_section3);
+  wifiManager.addParameter(&custom_modbus_dev);
+  wifiManager.addParameter(&custom_section4);
   wifiManager.addParameter(&custom_power_path);
   wifiManager.addParameter(&custom_pwr_export_path);
   wifiManager.addParameter(&custom_power_l1_path);
@@ -823,6 +828,7 @@ void WifiManagerSetup() {
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
   strcpy(mqtt_user, custom_mqtt_user.getValue());
   strcpy(mqtt_passwd, custom_mqtt_passwd.getValue());
+  strcpy(modbus_dev, custom_modbus_dev.getValue());
   strcpy(power_path, custom_power_path.getValue());
   strcpy(pwr_export_path, custom_pwr_export_path.getValue());
   strcpy(power_l1_path, custom_power_l1_path.getValue());
@@ -842,6 +848,7 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
   DEBUG_SERIAL.println("\tmqtt_user : " + String(mqtt_user));
   DEBUG_SERIAL.println("\tmqtt_passwd : " + String(mqtt_passwd));
+  DEBUG_SERIAL.println("\tmodbus_dev : " + String(modbus_dev));
   DEBUG_SERIAL.println("\tpower_path : " + String(power_path));
   DEBUG_SERIAL.println("\tpwr_export_path : " + String(pwr_export_path));
   DEBUG_SERIAL.println("\tpower_l1_path : " + String(power_l1_path));
@@ -887,6 +894,7 @@ void WifiManagerSetup() {
     preferences.putString("mqtt_topic", mqtt_topic);
     preferences.putString("mqtt_user", mqtt_user);
     preferences.putString("mqtt_passwd", mqtt_passwd);
+    preferences.putString("modbus_dev", modbus_dev);
     preferences.putString("power_path", power_path);
     preferences.putString("pwr_export_path", pwr_export_path);
     preferences.putString("power_l1_path", power_l1_path);
