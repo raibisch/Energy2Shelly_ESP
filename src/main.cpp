@@ -49,6 +49,9 @@ char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
 char modbus_dev[10] = "71"; // default for KSEM
+char shelly_port[6] = "2220"; // old: 1010; new (FW>=226): 2220
+char force_pwr_decimals[6] = "true"; // to fix Marstek bug
+bool forcePwrDecimals = true; // to fix Marstek bug
 
 IPAddress modbus_ip;
 ModbusIP modbus1;
@@ -124,7 +127,12 @@ WiFiUDP UdpRPC;
 #endif
 
 double round2(double value) {
-  return (int)(value * 100 + 0.5) / 100.0;
+  int ivalue = (int)(value * 100.0 + (value > 0.0 ? 0.5 : -0.5));
+
+  // fix Marstek bug: make sure to have decimal numbers
+  if(forcePwrDecimals && (ivalue % 100 == 0)) ivalue++;
+  
+  return ivalue / 100.0;
 }
 
 JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
@@ -149,7 +157,7 @@ void setPowerData(double totalPower) {
     PhasePower[i].power = round2(totalPower * 0.3333);
     PhasePower[i].voltage = defaultVoltage;
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
-    PhasePower[i].apparentPower = PhasePower[i].power;
+    PhasePower[i].apparentPower = round2(PhasePower[i].power);
     PhasePower[i].powerFactor = defaultPowerFactor;
     PhasePower[i].frequency = defaultFrequency;
   }
@@ -164,7 +172,7 @@ void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
   for (int i = 0; i <= 2; i++) {
     PhasePower[i].voltage = defaultVoltage;
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
-    PhasePower[i].apparentPower = PhasePower[i].power;
+    PhasePower[i].apparentPower = round2(PhasePower[i].power);
     PhasePower[i].powerFactor = defaultPowerFactor;
     PhasePower[i].frequency = defaultFrequency;
   }
@@ -753,6 +761,8 @@ void WifiManagerSetup() {
   strcpy(power_l3_path, preferences.getString("power_l3_path", power_l3_path).c_str());
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
+  strcpy(shelly_port, preferences.getString("shelly_port", shelly_port).c_str());
+  strcpy(force_pwr_decimals, preferences.getString("force_pwr_decimals", force_pwr_decimals).c_str());
 
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
   WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for Modbus TCP SUNSPEC data", input_type, 40);
@@ -762,6 +772,8 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_led_gpio("led_gpio", "<b>GPIO</b><br>of internal LED", led_gpio, 3);
   WiFiManagerParameter custom_led_gpio_i("led_gpio_i", "<b>GPIO is inverted</b><br><code>true</code> or <code>false</code>", led_gpio_i, 6);
   WiFiManagerParameter custom_shelly_mac("mac", "<b>Shelly ID</b><br>12 char hexadecimal, defaults to MAC address of ESP", shelly_mac, 13);
+  WiFiManagerParameter custom_shelly_port("shelly_port", "<b>Shelly UDP port</b><br><code>1010</code> for old Marstek FW, <code>2220</code> for new Marstek FW v226+/v108+", shelly_port, 6);
+  WiFiManagerParameter custom_force_pwr_decimals("force_pwr_decimals", "<b>Force decimals numbers for Power values</b><br><code>true</code> to fix Marstek bug", force_pwr_decimals, 6);
   WiFiManagerParameter custom_section2("<hr><h3>MQTT options</h3>");
   WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
   WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
@@ -792,6 +804,8 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_led_gpio);
   wifiManager.addParameter(&custom_led_gpio_i);
   wifiManager.addParameter(&custom_shelly_mac);
+  wifiManager.addParameter(&custom_shelly_port);
+  wifiManager.addParameter(&custom_force_pwr_decimals);
   wifiManager.addParameter(&custom_section2);
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_topic);
@@ -807,7 +821,7 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_power_l3_path);
   wifiManager.addParameter(&custom_energy_in_path);
   wifiManager.addParameter(&custom_energy_out_path);
-
+  
 
   if (!wifiManager.autoConnect("Energy2Shelly")) {
     DEBUG_SERIAL.println("failed to connect and hit timeout");
@@ -836,6 +850,8 @@ void WifiManagerSetup() {
   strcpy(power_l3_path, custom_power_l3_path.getValue());
   strcpy(energy_in_path, custom_energy_in_path.getValue());
   strcpy(energy_out_path, custom_energy_out_path.getValue());
+  strcpy(shelly_port, custom_shelly_port.getValue());
+  strcpy(force_pwr_decimals, custom_force_pwr_decimals.getValue());
 
   DEBUG_SERIAL.println("The values in the preferences are: ");
   DEBUG_SERIAL.println("\tinput_type : " + String(input_type));
@@ -856,7 +872,8 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tpower_l3_path : " + String(power_l3_path));
   DEBUG_SERIAL.println("\tenergy_in_path : " + String(energy_in_path));
   DEBUG_SERIAL.println("\tenergy_out_path : " + String(energy_out_path));
-
+  DEBUG_SERIAL.println("\tshelly_port : " + String(shelly_port));
+  DEBUG_SERIAL.println("\tforce_pwr_decimals : " + String(force_pwr_decimals));
 
   if (strcmp(input_type, "SMA") == 0) {
     dataSMA = true;
@@ -882,6 +899,12 @@ void WifiManagerSetup() {
     led_i = false;
   }
 
+  if (strcmp(force_pwr_decimals, "true") == 0) {
+    forcePwrDecimals = true;
+  } else {
+    forcePwrDecimals = false;
+  }
+
   if (shouldSaveConfig) {
     DEBUG_SERIAL.println("saving config");
     preferences.putString("input_type", input_type);
@@ -902,6 +925,8 @@ void WifiManagerSetup() {
     preferences.putString("power_l3_path", power_l3_path);
     preferences.putString("energy_in_path", energy_in_path);
     preferences.putString("energy_out_path", energy_out_path);
+    preferences.putString("shelly_port", shelly_port);
+    preferences.putString("force_pwr_decimals", force_pwr_decimals);
     wifiManager.reboot();
   }
   DEBUG_SERIAL.println("local ip");
@@ -970,7 +995,7 @@ void setup(void) {
   server.begin();
 
   // Set up RPC over UDP for Marstek users
-  UdpRPC.begin(1010);
+  UdpRPC.begin(String(shelly_port).toInt()); 
 
   // Set up MQTT
   if (dataMQTT) {
