@@ -37,7 +37,7 @@ SMA Multicast code is based on https://www.mikrocontroller.net/topic/559607
               -> Energy2Shelly_ESP responds to <br><code>{"ENERGY":{"Power":7.3,"Pow1":98,"Pow2":196,"Pow3":294,"Consumption":98,"Production":131}}</code><br>
         
   - <code>SMA</code>
-    - SMA Energy Meter or Home Manager UDP multicast data
+    - SMA Energy Meter or Home Manager UDP multicast data; if you have multiple SMA energy meters you can optionally provide the serial number of the source you want to use in the configuration options
   - <code>SHRDZM</code>
       - SHRDZM smart meter interface (common in Austria) with UDP unicast data; please enable UDP broadcasts to the IP of the ESP and port 9522 within SHRDZM
   - <code>HTTP</code>
