@@ -1,4 +1,4 @@
-// Energy2Shelly_ESP v0.5.1
+// Energy2Shelly_ESP v0.5.2
 #include <Arduino.h>
 #include <Preferences.h>
 #ifndef ESP32
@@ -52,6 +52,7 @@ char modbus_dev[10] = "71"; // default for KSEM
 char shelly_port[6] = "2220"; // old: 1010; new (FW>=226): 2220
 char force_pwr_decimals[6] = "true"; // to fix Marstek bug
 bool forcePwrDecimals = true; // to fix Marstek bug
+char sma_id[17] = "";
 
 IPAddress modbus_ip;
 ModbusIP modbus1;
@@ -474,7 +475,13 @@ void parseSMA() {
         offset += 2;
         // uint16_t susyID = (offset[0] << 8) + offset[1];
         offset += 2;
-        // uint32_t serial = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
+        uint32_t serial = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
+        DEBUG_SERIAL.print("Received SMA multicast from ");
+        DEBUG_SERIAL.println(serial);
+        if ((strcmp(sma_id, "") != 0) && (String(sma_id).toInt() != serial)) {
+          DEBUG_SERIAL.println("SMA serial not matching - ignoring packet");
+          break;
+        }
         offset += 4;
         // uint32_t timestamp = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
         offset += 4;
@@ -763,7 +770,8 @@ void WifiManagerSetup() {
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
   strcpy(shelly_port, preferences.getString("shelly_port", shelly_port).c_str());
   strcpy(force_pwr_decimals, preferences.getString("force_pwr_decimals", force_pwr_decimals).c_str());
-
+  strcpy(sma_id, preferences.getString("sma_id", sma_id).c_str());
+  
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
   WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for Modbus TCP SUNSPEC data", input_type, 40);
   WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP, query url for generic HTTP or Modbus TCP server IP for SUNSPEC", mqtt_server, 80);
@@ -774,6 +782,7 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_shelly_mac("mac", "<b>Shelly ID</b><br>12 char hexadecimal, defaults to MAC address of ESP", shelly_mac, 13);
   WiFiManagerParameter custom_shelly_port("shelly_port", "<b>Shelly UDP port</b><br><code>1010</code> for old Marstek FW, <code>2220</code> for new Marstek FW v226+/v108+", shelly_port, 6);
   WiFiManagerParameter custom_force_pwr_decimals("force_pwr_decimals", "<b>Force decimals numbers for Power values</b><br><code>true</code> to fix Marstek bug", force_pwr_decimals, 6);
+  WiFiManagerParameter custom_sma_id("sma_id", "<b>SMA serial number</b><br>optional serial number if you have more than one SMA EM/HM in your network", sma_id, 16);
   WiFiManagerParameter custom_section2("<hr><h3>MQTT options</h3>");
   WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
   WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
@@ -806,6 +815,7 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_shelly_mac);
   wifiManager.addParameter(&custom_shelly_port);
   wifiManager.addParameter(&custom_force_pwr_decimals);
+  wifiManager.addParameter(&custom_sma_id);
   wifiManager.addParameter(&custom_section2);
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_topic);
@@ -852,6 +862,7 @@ void WifiManagerSetup() {
   strcpy(energy_out_path, custom_energy_out_path.getValue());
   strcpy(shelly_port, custom_shelly_port.getValue());
   strcpy(force_pwr_decimals, custom_force_pwr_decimals.getValue());
+  strcpy(sma_id, custom_sma_id.getValue());
 
   DEBUG_SERIAL.println("The values in the preferences are: ");
   DEBUG_SERIAL.println("\tinput_type : " + String(input_type));
@@ -874,6 +885,7 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tenergy_out_path : " + String(energy_out_path));
   DEBUG_SERIAL.println("\tshelly_port : " + String(shelly_port));
   DEBUG_SERIAL.println("\tforce_pwr_decimals : " + String(force_pwr_decimals));
+  DEBUG_SERIAL.println("\tsma_id : " + String(sma_id));
 
   if (strcmp(input_type, "SMA") == 0) {
     dataSMA = true;
@@ -927,6 +939,7 @@ void WifiManagerSetup() {
     preferences.putString("energy_out_path", energy_out_path);
     preferences.putString("shelly_port", shelly_port);
     preferences.putString("force_pwr_decimals", force_pwr_decimals);
+    preferences.putString("sma_id", sma_id);
     wifiManager.reboot();
   }
   DEBUG_SERIAL.println("local ip");
