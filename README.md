@@ -9,8 +9,8 @@ SMA Multicast code is based on https://www.mikrocontroller.net/topic/559607
 
 
 # Installation
-1) compile for your microcontrollers
-2) flashing and power up (it opens a hotspot named "Energy2Shelly")
+1) connect your ESP to your PC using USB and follow the instructions on the [webflasher](https://therealmoeder.github.io/Energy2Shelly_ESP/)
+2) wait for the device to open a hotspot named "Energy2Shelly"
 3) running WifiManager for intial WiFi setup and further configuration
 
   ### On the captive portal you can currently enter:
