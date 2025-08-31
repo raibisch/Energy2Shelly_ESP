@@ -7,7 +7,7 @@
         "parts": [
           { "path": "esp8266.bin", "offset": 0 }
         ]
-      }
+      },
       {
         "chipFamily": "ESP32",
         "improv": false,
