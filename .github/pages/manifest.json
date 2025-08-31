@@ -1,0 +1,19 @@
+{
+    "name": "Energy2Shelly",
+    "builds": [
+      {
+        "chipFamily": "ESP8266",
+        "improv": false,
+        "parts": [
+          { "path": "esp8266.bin", "offset": 0 }
+        ]
+      }
+      {
+        "chipFamily": "ESP32",
+        "improv": false,
+        "parts": [
+          { "path": "esp32.bin", "offset": 0 }
+        ]
+      }
+    ]
+  }
