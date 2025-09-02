@@ -3,13 +3,11 @@ name: CI
 on:
   # Runs on pushes targeting the default branch
   push:
-    branches: ["main"]
     paths-ignore:
       - '**.md'
       - '/doc/**'
       - '/screenshots/**'
   pull_request:
-    branches: ["main"]
     
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -50,15 +48,22 @@ jobs:
           
   deploy:
     needs: build
-    if: github.ref_name == 'main'
+    if: github.ref_type == 'tag'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     permissions:
+      contents: write   # to upload release artifacts
       pages: write      # to deploy to Pages
       id-token: write   # to verify the deployment originates from an appropriate source
     runs-on: ubuntu-latest
     steps:
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./.github/pages/esp8266.bin
+            ./.github/pages/esp32.bin 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
