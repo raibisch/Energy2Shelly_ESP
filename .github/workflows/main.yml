@@ -39,6 +39,13 @@ jobs:
         run: |
           cp .pio/build/esp32/merged-flash.bin ./.github/pages/esp32.bin
           cp .pio/build/esp8266/firmware.bin ./.github/pages/esp8266.bin
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            ./.github/pages/esp32.bin
+            ./.github/pages/esp8266.bin
       - name: Setup Github Page
         uses: actions/configure-pages@v5
       - name: Upload webflash files
@@ -58,9 +65,14 @@ jobs:
       id-token: write   # to verify the deployment originates from an appropriate source
     runs-on: ubuntu-latest
     steps:
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
           files: |
             ./.github/pages/esp8266.bin
             ./.github/pages/esp32.bin 
