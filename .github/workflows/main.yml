@@ -74,8 +74,8 @@ jobs:
         with:
           fail_on_unmatched_files: true
           files: |
-            ./.github/pages/esp8266.bin
-            ./.github/pages/esp32.bin 
+            ./esp8266.bin
+            ./esp32.bin 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
