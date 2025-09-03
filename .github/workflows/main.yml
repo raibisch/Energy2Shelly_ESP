@@ -3,13 +3,11 @@ name: CI
 on:
   # Runs on pushes targeting the default branch
   push:
-    branches: ["main"]
     paths-ignore:
       - '**.md'
       - '/doc/**'
       - '/screenshots/**'
   pull_request:
-    branches: ["main"]
     
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -41,6 +39,13 @@ jobs:
         run: |
           cp .pio/build/esp32/merged-flash.bin ./.github/pages/esp32.bin
           cp .pio/build/esp8266/firmware.bin ./.github/pages/esp8266.bin
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            ./.github/pages/esp32.bin
+            ./.github/pages/esp8266.bin
       - name: Setup Github Page
         uses: actions/configure-pages@v5
       - name: Upload webflash files
@@ -50,15 +55,27 @@ jobs:
           
   deploy:
     needs: build
-    if: github.ref_name == 'main'
+    if: github.ref_type == 'tag'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     permissions:
+      contents: write   # to upload release artifacts
       pages: write      # to deploy to Pages
       id-token: write   # to verify the deployment originates from an appropriate source
     runs-on: ubuntu-latest
     steps:
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            ./esp8266.bin
+            ./esp32.bin 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
