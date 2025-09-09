@@ -33,7 +33,7 @@ unsigned long currentMillis;
 char input_type[40];
 char mqtt_server[80];
 char mqtt_port[6] = "1883";
-char mqtt_topic[60] = "tele/meter/SENSOR";
+char mqtt_topic[90] = "tele/meter/SENSOR";
 char mqtt_user[40] = "";
 char mqtt_passwd[40] = "";
 char power_path[60] = "";
@@ -784,7 +784,7 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_force_pwr_decimals("force_pwr_decimals", "<b>Force decimals numbers for Power values</b><br><code>true</code> to fix Marstek bug", force_pwr_decimals, 6);
   WiFiManagerParameter custom_sma_id("sma_id", "<b>SMA serial number</b><br>optional serial number if you have more than one SMA EM/HM in your network", sma_id, 16);
   WiFiManagerParameter custom_section2("<hr><h3>MQTT options</h3>");
-  WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
+  WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 90);
   WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
   WiFiManagerParameter custom_mqtt_passwd("passwd", "<b>MQTT password</b><br>optional", mqtt_passwd, 40);
   WiFiManagerParameter custom_section3("<hr><h3>Modbus TCP options</h3>");
@@ -1132,3 +1132,4 @@ void loop() {
   }
   handleblinkled();
 }
+
