@@ -55,7 +55,7 @@ char force_pwr_decimals[6] = "true"; // to fix Marstek bug
 bool forcePwrDecimals = true; // to fix Marstek bug
 char sma_id[17] = "";
 
-char tibber_url  [32] = "http://192.168.2.87";  // replace with your IP from Tibber-Pulse
+char tibber_url  [32] = "192.168.2.xx";         // replace with your IP from Tibber-Pulse
 char tibber_user[32] = "admin";                 // fixed!
 char tibber_password[32] = "xxxx-xxxx";         // replace with password printed on Tibbel-Pulse-Adapter
 char tibber_rpc[32]  =  "/data.json?node_id=1"; // fixed!
@@ -163,10 +163,10 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
 void setPowerData(double totalPower) {
   for (int i = 0; i <= 2; i++) {
     PhasePower[i].power = round2(totalPower * 0.3333);
-    PhasePower[i].voltage = defaultVoltage;
+    PhasePower[i].voltage = round2(defaultVoltage);
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
     PhasePower[i].apparentPower = round2(PhasePower[i].power);
-    PhasePower[i].powerFactor = defaultPowerFactor;
+    PhasePower[i].powerFactor = round2(defaultPowerFactor);
     PhasePower[i].frequency = defaultFrequency;
   }
   DEBUG_SERIAL.print("Current total power: ");
@@ -178,10 +178,10 @@ void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
   PhasePower[1].power = round2(phase2Power);
   PhasePower[2].power = round2(phase3Power);
   for (int i = 0; i <= 2; i++) {
-    PhasePower[i].voltage = defaultVoltage;
+    PhasePower[i].voltage = round2(defaultVoltage); 
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
     PhasePower[i].apparentPower = round2(PhasePower[i].power);
-    PhasePower[i].powerFactor = defaultPowerFactor;
+    PhasePower[i].powerFactor = round2(defaultPowerFactor);
     PhasePower[i].frequency = defaultFrequency;
   }
   DEBUG_SERIAL.print("Current power L1: ");
@@ -783,7 +783,7 @@ bool decodeSMLval(uint32_t &retval, byte * payload, byte* smlcode, uint smlsize,
   
   if ((nlen < 1) ||(nlen > 8))
   {
-    DEBUG_SERIAL.printf("decodeSMLval unvalid length &d\r\n", nlen);
+    DEBUG_SERIAL.printf("decodeSMLval unvalid length %d\r\n", nlen);
     return false;
   }
   
@@ -815,7 +815,8 @@ bool queryTibberPulseHTTP() {
   bool ret = true;
   int getlength = 0;
   DEBUG_SERIAL.print("Querying Tibber-Pulse raw SML: ");
-  String url = String(tibber_url);
+  String url = "http://";
+  url += String(tibber_url);
   url += String(tibber_rpc);
   //DEBUG_SERIAL.printf("Tibber URL:%s user:%s \r\n", url.c_str(), tibber_user);
   http.begin(wifi_client, url);
@@ -902,7 +903,6 @@ bool queryTibberPulseHTTP() {
   return ret;
 }
 
-
 void WifiManagerSetup() {
   // Set Shelly ID to ESP's MAC address by default
   uint8_t mac[6];
@@ -941,7 +941,7 @@ void WifiManagerSetup() {
 
   WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP, query url for generic HTTP or Modbus TCP server IP for SUNSPEC", mqtt_server, 80);
   WiFiManagerParameter custom_mqtt_port("port", "<b>Port</b><br> for MQTT or Modbus TCP (SUNSPEC)", mqtt_port, 6);
-  WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP and SUNSPEC, in milliseconds", query_period, 10);
+  WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP, SUNSPEC and TIBBERPULSE, in milliseconds", query_period, 10);
   WiFiManagerParameter custom_led_gpio("led_gpio", "<b>GPIO</b><br>of internal LED", led_gpio, 3);
   WiFiManagerParameter custom_led_gpio_i("led_gpio_i", "<b>GPIO is inverted</b><br><code>true</code> or <code>false</code>", led_gpio_i, 6);
   WiFiManagerParameter custom_shelly_mac("mac", "<b>Shelly ID</b><br>12 char hexadecimal, defaults to MAC address of ESP", shelly_mac, 13);
@@ -964,9 +964,9 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. <code>ENERGY.FeedIn</code>", energy_out_path, 60);
   // for Tibber-Pulse
   WiFiManagerParameter custom_section5("<hr><h3>Tibber-Pulse</h3>");
-  WiFiManagerParameter custom_tibber_url("url"                 , "<b>url</b><br>e.g.:<code>http://192.168.xx.xx</code>", tibber_url, 32);
-  WiFiManagerParameter custom_tibber_user("tibber_user"        , "<b>user</b><br><code>admin</code>",                    tibber_user, 32);
-  WiFiManagerParameter custom_tibber_password("tibber_password", "<b>password</b><br>form:<code>xxxx-xxxx</code>",       tibber_password, 32);
+  WiFiManagerParameter custom_tibber_url("url"                 , "<b>url</b><br>e.g.:<code>192.168.xx.xx</code>", tibber_url, 32);
+  WiFiManagerParameter custom_tibber_user("tibber_user"        , "<b>user</b><br><code>admin</code>",             tibber_user, 32);
+  WiFiManagerParameter custom_tibber_password("tibber_password", "<b>password</b><br>form:<code>xxxx-xxxx</code>",tibber_password, 32);
 
   WiFiManager wifiManager;
   if (!DEBUG) {
@@ -1202,7 +1202,9 @@ void setup(void) {
   webSocket.onEvent(webSocketEvent);
   server.addHandler(&webSocket);
   server.begin();
-
+#ifdef ESP32
+  http.setConnectTimeout(500); // if url not found or down
+#endif
   // Set up RPC over UDP for Marstek users
   UdpRPC.begin(String(shelly_port).toInt()); 
 
