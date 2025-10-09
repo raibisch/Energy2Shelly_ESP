@@ -22,7 +22,7 @@
 #include <WiFiUdp.h>
 #include <ModbusIP_ESP8266.h>
 
-#define DEBUG true // set to false for no DEBUG output
+#define DEBUG false // set to false for no DEBUG output
 #define DEBUG_SERIAL if(DEBUG)Serial
 
 unsigned long startMillis = 0;
@@ -50,7 +50,7 @@ char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
 char modbus_dev[10] = "71"; // default for KSEM
-char shelly_port[6] = "2220"; // old: 1010; new (FW>=226): 2220
+char shelly_port[6] = "2220"; // old: 1010; new (FW>=226): 2220; Venus-E V3: 1010 !
 char force_pwr_decimals[6] = "true"; // to fix Marstek bug
 bool forcePwrDecimals = true; // to fix Marstek bug
 char sma_id[17] = "";
@@ -143,6 +143,17 @@ double round2(double value) {
   return ivalue / 100.0;
 }
 
+double round1(double value) {
+  int ivalue = (int)(value * 10.0 + (value > 0.0 ? 0.5 : -0.5));
+
+  // fix Marstek bug: make sure to have decimal numbers
+  if(forcePwrDecimals && (ivalue % 100 == 0)) ivalue++;
+  
+  return ivalue / 10.0;
+}
+
+
+
 JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
   for (size_t n = 0; path[n]; n++) {
     // Not a full array support, but works for Shelly 3EM emeters array!
@@ -162,34 +173,34 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
 
 void setPowerData(double totalPower) {
   for (int i = 0; i <= 2; i++) {
-    PhasePower[i].power = round2(totalPower * 0.3333);
-    PhasePower[i].voltage = round2(defaultVoltage);
-    PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
+    PhasePower[i].power         = round1(totalPower * 0.3333);
+    PhasePower[i].voltage       = round1(defaultVoltage);
+    PhasePower[i].current       = round2(PhasePower[i].power / PhasePower[i].voltage);
     PhasePower[i].apparentPower = round2(PhasePower[i].power);
-    PhasePower[i].powerFactor = round2(defaultPowerFactor);
-    PhasePower[i].frequency = defaultFrequency;
+    PhasePower[i].powerFactor   = defaultPowerFactor;
+    PhasePower[i].frequency     = defaultFrequency;
   }
-  DEBUG_SERIAL.print("Current total power: ");
-  DEBUG_SERIAL.println(totalPower);
+  //DEBUG_SERIAL.print("Current total power: ");
+  DEBUG_SERIAL.printf("   %.1f[W]\r\n",totalPower);
 }
 
 void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
-  PhasePower[0].power = round2(phase1Power);
-  PhasePower[1].power = round2(phase2Power);
-  PhasePower[2].power = round2(phase3Power);
+  PhasePower[0].power = phase1Power;
+  PhasePower[1].power = phase2Power;
+  PhasePower[2].power = phase3Power;
   for (int i = 0; i <= 2; i++) {
-    PhasePower[i].voltage = round2(defaultVoltage); 
+    PhasePower[i].voltage = round1(defaultVoltage); 
     PhasePower[i].current = round2(PhasePower[i].power / PhasePower[i].voltage);
     PhasePower[i].apparentPower = round2(PhasePower[i].power);
-    PhasePower[i].powerFactor = round2(defaultPowerFactor);
-    PhasePower[i].frequency = defaultFrequency;
+    PhasePower[i].powerFactor = defaultPowerFactor;
+    PhasePower[i].frequency   = defaultFrequency;
   }
   DEBUG_SERIAL.print("Current power L1: ");
   DEBUG_SERIAL.print(phase1Power);
   DEBUG_SERIAL.print(" - L2: ");
   DEBUG_SERIAL.print(phase2Power);
   DEBUG_SERIAL.print(" - L3: ");
-  DEBUG_SERIAL.println(phase3Power);
+  DEBUG_SERIAL.print(phase3Power);
 }
 
 void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
@@ -197,7 +208,7 @@ void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
     PhaseEnergy[i].consumption = round2(totalEnergyGridSupply * 0.3333);
     PhaseEnergy[i].gridfeedin = round2(totalEnergyGridFeedIn * 0.3333);
   }
-  DEBUG_SERIAL.print("Total consumption: ");
+  DEBUG_SERIAL.print("Total consuption: ");
   DEBUG_SERIAL.print(totalEnergyGridSupply);
   DEBUG_SERIAL.print(" - Total Grid Feed-In: ");
   DEBUG_SERIAL.println(totalEnergyGridFeedIn);
@@ -294,6 +305,36 @@ void GetDeviceInfo() {
   blinkled(ledblinkduration);
 }
 
+
+/*
+Example Data for EM3 Pro
+id	0
+a_current	0.593
+a_voltage	230.5
+a_act_power	-75.4
+a_aprt_power	136.9
+a_pf	0.68
+a_freq	50
+b_current	11.608
+b_voltage	228.5
+b_act_power	2655.2
+b_aprt_power	2656.6
+b_pf	1
+b_freq	50
+c_current	0.058
+c_voltage	232.1
+c_act_power	2.1
+c_aprt_power	13.5
+c_pf	0.54
+c_freq	50
+n_current	null
+total_current	12.259
+total_act_power	2581.781
+total_aprt_power	2806.935
+user_calibrated_phase	[]
+
+*/
+
 void EMGetStatus() {
   JsonDocument jsonResponse;
   jsonResponse["id"] = 0;
@@ -316,8 +357,8 @@ void EMGetStatus() {
   jsonResponse["c_pf"] = PhasePower[2].powerFactor;
   jsonResponse["c_freq"] = PhasePower[2].frequency;
   jsonResponse["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / ((float)defaultVoltage));
-  jsonResponse["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
-  jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
+  jsonResponse["total_act_power"] = round2(PhasePower[0].power + PhasePower[1].power + PhasePower[2].power);
+  jsonResponse["total_aprt_power"] = round2(PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower);
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
   blinkled(ledblinkduration);
@@ -814,7 +855,7 @@ bool decodeSMLval(uint32_t &retval, byte * payload, byte* smlcode, uint smlsize,
 bool queryTibberPulseHTTP() {
   bool ret = true;
   int getlength = 0;
-  DEBUG_SERIAL.print("Querying Tibber-Pulse raw SML: ");
+  //DEBUG_SERIAL.print("Querying Tibber-Pulse raw SML: ");
   String url = "http://";
   url += String(tibber_url);
   url += String(tibber_rpc);
@@ -824,7 +865,7 @@ bool queryTibberPulseHTTP() {
   int httpResponseCode = http.GET();
   if (httpResponseCode > 0) {
     getlength = http.getSize();
-    DEBUG_SERIAL.printf(" message size=%d\r\n", getlength);
+    //DEBUG_SERIAL.printf(" message size=%d\r\n", getlength);
     if ((getlength > SMLPAYLOADMAXSIZE) || (getlength ==0)) {
       http.end();
       return false;
@@ -834,7 +875,7 @@ bool queryTibberPulseHTTP() {
 
     if (getlength < 260) // todo: change for other meter models
     {
-     DEBUG_SERIAL.printf("ERROR SML-data to short! length=%d \r\n", getlength);
+     //DEBUG_SERIAL.printf("ERROR SML-data to short! length=%d \r\n", getlength);
      /* for extra debugging
      for (size_t i = 0; i < getlength; i++) {
        DEBUG_SERIAL.printf("%02xh ",smlpayload[i]);
@@ -880,10 +921,10 @@ bool queryTibberPulseHTTP() {
       uint32_t watt = 0;
       if (decodeSMLval(watt, smlpayload, sml_16_7_0, sizeof(sml_16_7_0), 15)) 
       {
-        setPowerData(int16_t(watt) / 1000.0);
+        setPowerData(int16_t(watt));
       }
       else {
-        DEBUG_SERIAL.println ("SML ERROR Parsing sml_16_7_0");
+        //DEBUG_SERIAL.println ("SML ERROR Parsing sml_16_7_0");
         ret = false;
       }
       // extra debug info
@@ -894,7 +935,7 @@ bool queryTibberPulseHTTP() {
   }
   else 
   {
-    DEBUG_SERIAL.printf("TIBBER httpGETRequest Error code:%d \r\n", httpResponseCode);
+    //DEBUG_SERIAL.printf("TIBBER httpGETRequest Error code:%d \r\n", httpResponseCode);
     ret =false;
   }
   // Free resources
