@@ -22,7 +22,7 @@
 #include <WiFiUdp.h>
 #include <ModbusIP_ESP8266.h>
 
-#define DEBUG false // set to false for no DEBUG output
+#define DEBUG true // set to false for no DEBUG output
 
 // REMARK: for MARSTEK Venus V3 (from github.com/raibisch) 
 // full story:
@@ -82,7 +82,7 @@ const uint8_t defaultPowerFactor = 1;
 unsigned long ledOffTime = 0;
 uint8_t led = 0;
 bool led_i = false;
-const uint8_t ledblinkduration = 40;
+const uint8_t ledblinkduration = 50;
 char led_gpio[3] = "";
 char led_gpio_i[6];
 
@@ -193,6 +193,12 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
 
 void setPowerData(double totalPower) {
   // for Shelly EM1
+  // Test for MARSTEK (because of weak regulation)
+  if ((totalPower > 0) && (totalPower < 50))
+  {
+    totalPower = totalPower*0.9;
+  }
+
   TotalPower.power         = round1(totalPower);
   TotalPower.apparentPower = round1(totalPower);
   TotalPower.voltage       = defaultVoltage;
@@ -237,10 +243,10 @@ void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
     PhaseEnergy[i].consumption = round2(totalEnergyGridSupply * 0.3333);
     PhaseEnergy[i].gridfeedin = round2(totalEnergyGridFeedIn * 0.3333);
   }
-  DEBUG_SERIAL.print("Total consuption: ");
-  DEBUG_SERIAL.print(totalEnergyGridSupply);
-  DEBUG_SERIAL.print(" - Total Grid Feed-In: ");
-  DEBUG_SERIAL.println(totalEnergyGridFeedIn);
+  //DEBUG_SERIAL.print("Total consuption: ");
+  //DEBUG_SERIAL.print(totalEnergyGridSupply);
+  //DEBUG_SERIAL.print(" - Total Grid Feed-In: ");
+  //DEBUG_SERIAL.println(totalEnergyGridFeedIn);
 }
 
 //callback notifying us of the need to save WifiManager config
@@ -435,7 +441,7 @@ void EM1GetDeviceInfo() {
   jsonResponse["ver"] = "1.4.4";
   jsonResponse["app"] = "ProEM50";
   jsonResponse["auth_en"] = false;
-  jsonResponse["profile"] = "singlephase";
+  jsonResponse["profile"] = "monophase";
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
   blinkled(ledblinkduration);
@@ -1330,6 +1336,7 @@ void setup(void) {
     EM1GetStatus();
     request->send(200, "application/json", serJsonResponse);
   });
+  
    server.on("/rpc/EM1.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
     EM1GetConfig();
     request->send(200, "application/json", serJsonResponse);
@@ -1343,12 +1350,12 @@ void setup(void) {
 #ifdef ESP32
   http.setConnectTimeout(500); // if url not found or down
 #endif
-  // Set up RPC over UDP for Marstek users
-  //UdpRPC.begin(String(shelly_port).toInt()); 
-#ifdef TEST_CUSTOM_UDP_PORT
+  
+#ifdef DEBUG_CUSTOM_UDP_PORT
   UdpRPC.begin(2223); // Test EM1
 #else
- 
+  // Set up RPC over UDP for Marstek users
+  UdpRPC.begin(String(shelly_port).toInt()); 
 #endif
 
   // Set up MQTT
