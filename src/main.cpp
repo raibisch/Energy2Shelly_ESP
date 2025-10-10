@@ -23,6 +23,16 @@
 #include <ModbusIP_ESP8266.h>
 
 #define DEBUG false // set to false for no DEBUG output
+
+// REMARK: for MARSTEK Venus V3 (from github.com/raibisch) 
+// full story:
+// the 'Shelly PRO EM3' simulation shows valid values but the zero-feed-in (german: Nulleinspeisung) mode does not work !
+// so I tried to select at the MARSTEK App the 'Shelly PRO EM-50' (a single phase meter):
+// MARSTEK sends per UDP-Multicast (to local IP xxxx.xxx.xxx.255 Port 2223) a "EM1.GetStatus" request
+// ...so I extended the code to answer to this request (a quick and dirty hack - not extensive testet !)
+// ...first test: WOOW  now the zero-energy-mode works :-))
+#define DEBUG_CUSTOM_UDP_PORT 2223 // Test for emulation of Shelly EM-50 (single phase) 
+
 #define DEBUG_SERIAL if(DEBUG)Serial
 
 unsigned long startMillis = 0;
@@ -50,7 +60,7 @@ char shelly_mac[13];
 char shelly_name[26] = "shellypro3em-";
 char query_period[10] = "1000";
 char modbus_dev[10] = "71"; // default for KSEM
-char shelly_port[6] = "2220"; // old: 1010; new (FW>=226): 2220; Venus-E V3: 1010 !
+char shelly_port[6] = "1010"; // old: 1010; new (FW>=226): 2220; Venus-E V3: 1010 !
 char force_pwr_decimals[6] = "true"; // to fix Marstek bug
 bool forcePwrDecimals = true; // to fix Marstek bug
 char sma_id[17] = "";
@@ -72,7 +82,7 @@ const uint8_t defaultPowerFactor = 1;
 unsigned long ledOffTime = 0;
 uint8_t led = 0;
 bool led_i = false;
-const uint8_t ledblinkduration = 50;
+const uint8_t ledblinkduration = 40;
 char led_gpio[3] = "";
 char led_gpio_i[6];
 
@@ -112,6 +122,7 @@ struct EnergyData {
   double consumption;
 };
 
+PowerData TotalPower;     // by JG
 PowerData PhasePower[3];
 EnergyData PhaseEnergy[3];
 String serJsonResponse;
@@ -143,11 +154,20 @@ double round2(double value) {
   return ivalue / 100.0;
 }
 
+double round3(double value) {
+  int ivalue = (int)(value * 1000.0 + (value > 0.0 ? 0.5 : -0.5));
+
+  // fix Marstek bug: make sure to have decimal numbers
+  if(forcePwrDecimals && (ivalue % 1000 == 0)) ivalue++;
+  
+  return ivalue / 1000.0;
+}
+
 double round1(double value) {
   int ivalue = (int)(value * 10.0 + (value > 0.0 ? 0.5 : -0.5));
 
   // fix Marstek bug: make sure to have decimal numbers
-  if(forcePwrDecimals && (ivalue % 100 == 0)) ivalue++;
+  if(forcePwrDecimals && (ivalue % 10 == 0)) ivalue++;
   
   return ivalue / 10.0;
 }
@@ -172,6 +192,15 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
 }
 
 void setPowerData(double totalPower) {
+  // for Shelly EM1
+  TotalPower.power         = round1(totalPower);
+  TotalPower.apparentPower = round1(totalPower);
+  TotalPower.voltage       = defaultVoltage;
+  TotalPower.current       = round3(totalPower / double(defaultVoltage));
+  TotalPower.frequency     = defaultFrequency;
+  TotalPower.powerFactor   = defaultPowerFactor;
+  
+  // for Shelly 3EM
   for (int i = 0; i <= 2; i++) {
     PhasePower[i].power         = round1(totalPower * 0.3333);
     PhasePower[i].voltage       = round1(defaultVoltage);
@@ -305,7 +334,6 @@ void GetDeviceInfo() {
   blinkled(ledblinkduration);
 }
 
-
 /*
 Example Data for EM3 Pro
 id	0
@@ -388,6 +416,54 @@ void EMGetConfig() {
   jsonResponse["phase_selector"] = "a";
   jsonResponse["monitor_phase_sequence"] = true;
   jsonResponse["ct_type"] = "120A";
+  serializeJson(jsonResponse, serJsonResponse);
+  DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(ledblinkduration);
+}
+
+
+// for EM1
+void EM1GetDeviceInfo() {
+   JsonDocument jsonResponse;
+  jsonResponse["name"] = shelly_name;
+  jsonResponse["id"] = shelly_name;
+  jsonResponse["mac"] = shelly_mac;
+  jsonResponse["slot"] = 1;
+  jsonResponse["model"] = "SPEM-003CEBEU";
+  jsonResponse["gen"] = shelly_gen;
+  jsonResponse["fw_id"] = shelly_fw_id;
+  jsonResponse["ver"] = "1.4.4";
+  jsonResponse["app"] = "ProEM50";
+  jsonResponse["auth_en"] = false;
+  jsonResponse["profile"] = "singlephase";
+  serializeJson(jsonResponse, serJsonResponse);
+  DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(ledblinkduration);
+}
+
+void EM1GetConfig() {
+  JsonDocument jsonResponse;
+  jsonResponse["id"] = 0;
+  jsonResponse["name"] = nullptr;
+  jsonResponse["reverse"] = false;
+  jsonResponse["ct_type"] = "50A";
+  serializeJson(jsonResponse, serJsonResponse);
+  DEBUG_SERIAL.println(serJsonResponse);
+  blinkled(ledblinkduration);
+}
+
+
+void EM1GetStatus()
+{
+  JsonDocument jsonResponse;
+  jsonResponse["id"] = 0;
+  jsonResponse["voltage"]    = TotalPower.voltage;
+  jsonResponse["current"]    = TotalPower.current;
+  jsonResponse["act_power"]  = TotalPower.power;
+  jsonResponse["aprt_power"] = TotalPower.apparentPower;
+  jsonResponse["pf"] = 1;
+  jsonResponse["freq"] = 50;
+  jsonResponse["calibration"] = "factory";
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
   blinkled(ledblinkduration);
@@ -490,6 +566,16 @@ void parseUdpRPC() {
         EMGetConfig();
         rpcWrapper();
         UdpRPC.UDPPRINT(serJsonResponse.c_str());
+        // EM1
+       } else if (json["method"] == "EM1.GetStatus") {
+        EM1GetStatus();
+        rpcWrapper();
+        UdpRPC.UDPPRINT(serJsonResponse.c_str());
+      } else if (json["method"] == "EM1.GetConfig") {
+        EM1GetConfig();
+        rpcWrapper();
+        UdpRPC.UDPPRINT(serJsonResponse.c_str());
+
       } else {
         DEBUG_SERIAL.printf("RPC over UDP: unknown request: %s\n", buffer);
       }
@@ -792,7 +878,6 @@ void queryHTTP() {
 }
 
 // functions for Tibber-Pulse 
-
  enum { SMLPAYLOADMAXSIZE = 300 }; 
   byte smlpayload[SMLPAYLOADMAXSIZE] {0}; 
 /// @brief Helper function for parsing Tibber-pulse SML-Message
@@ -1240,6 +1325,18 @@ void setup(void) {
     request->send(200, "application/json", serJsonResponse);
   });
 
+  // EM1
+   server.on("/rpc/EM1.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EM1GetStatus();
+    request->send(200, "application/json", serJsonResponse);
+  });
+   server.on("/rpc/EM1.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
+    EM1GetConfig();
+    request->send(200, "application/json", serJsonResponse);
+  });
+
+  
+
   webSocket.onEvent(webSocketEvent);
   server.addHandler(&webSocket);
   server.begin();
@@ -1247,7 +1344,12 @@ void setup(void) {
   http.setConnectTimeout(500); // if url not found or down
 #endif
   // Set up RPC over UDP for Marstek users
-  UdpRPC.begin(String(shelly_port).toInt()); 
+  //UdpRPC.begin(String(shelly_port).toInt()); 
+#ifdef TEST_CUSTOM_UDP_PORT
+  UdpRPC.begin(2223); // Test EM1
+#else
+ 
+#endif
 
   // Set up MQTT
   if (dataMQTT) {
